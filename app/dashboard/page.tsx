@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, HardDrive, ShieldCheck, UsersRound } from "lucide-react";
+import { ArrowLeft, HardDrive, Instagram, ShieldCheck, UsersRound } from "lucide-react";
 import { Dashboard } from "@/components/dashboard";
 
 export default function DashboardPage() {
@@ -16,6 +16,12 @@ export default function DashboardPage() {
           </div>
         </Link>
         <div className="flex items-center gap-2">
+          <Link
+            href="/conectar"
+            className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm md:inline-flex"
+          >
+            <Instagram size={16} /> Instagram
+          </Link>
           <Link
             href="/limpeza"
             className="hidden items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm sm:inline-flex"
