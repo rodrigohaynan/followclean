@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   ExternalLink,
+  Instagram,
   Plus,
   Search,
   ShieldCheck,
@@ -16,10 +17,12 @@ import {
   buildCleanupQueue,
   DEFAULT_CLEANUP_SETTINGS,
   type CleanupSettings,
+  type ProfileMetadata,
 } from "@/lib/rules/engine";
 import {
   getAnalyses,
   getCleanupSettings,
+  getProfileMetadata,
   getProtectedProfiles,
   protectProfile,
   saveCleanupSettings,
@@ -28,21 +31,37 @@ import {
   type StoredAnalysis,
 } from "@/lib/storage/indexeddb";
 
+type Tab = "priority" | "review" | "protected";
+
+function sourceLabel(source: ProfileMetadata["dataSource"]) {
+  if (source === "meta_business_discovery") return "Meta";
+  if (source === "extension") return "Extensão";
+  if (source === "manual") return "Manual";
+  return "Pendente";
+}
+
 export function CleanupManager() {
   const [latest, setLatest] = useState<StoredAnalysis | null>(null);
   const [protectedProfiles, setProtectedProfiles] = useState<ProtectedProfile[]>([]);
+  const [profileMetadata, setProfileMetadata] = useState<ProfileMetadata[]>([]);
   const [settings, setSettings] = useState<CleanupSettings>(DEFAULT_CLEANUP_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [newProtected, setNewProtected] = useState("");
-  const [tab, setTab] = useState<"queue" | "protected">("queue");
+  const [tab, setTab] = useState<Tab>("priority");
 
   useEffect(() => {
-    Promise.all([getAnalyses(), getProtectedProfiles(), getCleanupSettings()])
-      .then(([history, protectedList, storedSettings]) => {
+    Promise.all([
+      getAnalyses(),
+      getProtectedProfiles(),
+      getCleanupSettings(),
+      getProfileMetadata(),
+    ])
+      .then(([history, protectedList, storedSettings, metadata]) => {
         setLatest(history[0] ?? null);
         setProtectedProfiles(protectedList);
         setSettings(storedSettings);
+        setProfileMetadata(metadata);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -54,20 +73,40 @@ export function CleanupManager() {
 
   const queue = useMemo(() => {
     if (!latest) return [];
-    return buildCleanupQueue(latest.analysis, protectedSet, settings);
-  }, [latest, protectedSet, settings]);
+    return buildCleanupQueue(latest.analysis, protectedSet, settings, profileMetadata);
+  }, [latest, protectedSet, settings, profileMetadata]);
 
-  const filteredQueue = useMemo(() => {
-    const normalized = query.trim().toLowerCase().replace(/^@/, "");
-    if (!normalized) return queue;
-    return queue.filter((item) => item.username.includes(normalized));
-  }, [queue, query]);
+  const priority = useMemo(
+    () => queue.filter((item) => item.classification === "priority"),
+    [queue],
+  );
+  const review = useMemo(
+    () => queue.filter((item) => item.classification === "review"),
+    [queue],
+  );
 
-  const filteredProtected = useMemo(() => {
-    const normalized = query.trim().toLowerCase().replace(/^@/, "");
-    if (!normalized) return protectedProfiles;
-    return protectedProfiles.filter((item) => item.username.includes(normalized));
-  }, [protectedProfiles, query]);
+  const normalizedQuery = query.trim().toLowerCase().replace(/^@/, "");
+  const filteredPriority = useMemo(
+    () =>
+      normalizedQuery
+        ? priority.filter((item) => item.username.includes(normalizedQuery))
+        : priority,
+    [priority, normalizedQuery],
+  );
+  const filteredReview = useMemo(
+    () =>
+      normalizedQuery
+        ? review.filter((item) => item.username.includes(normalizedQuery))
+        : review,
+    [review, normalizedQuery],
+  );
+  const filteredProtected = useMemo(
+    () =>
+      normalizedQuery
+        ? protectedProfiles.filter((item) => item.username.includes(normalizedQuery))
+        : protectedProfiles,
+    [protectedProfiles, normalizedQuery],
+  );
 
   async function addProtected(username: string) {
     const record = await protectProfile(username);
@@ -85,6 +124,13 @@ export function CleanupManager() {
 
   async function toggleRule() {
     const next = { ...settings, notFollowingBack: !settings.notFollowingBack };
+    setSettings(next);
+    await saveCleanupSettings(next);
+  }
+
+  async function updateMaxFollowers(value: number) {
+    const safeValue = Number.isFinite(value) ? Math.max(0, Math.round(value)) : 2000;
+    const next = { ...settings, maxFollowers: safeValue };
     setSettings(next);
     await saveCleanupSettings(next);
   }
@@ -115,13 +161,25 @@ export function CleanupManager() {
     );
   }
 
+  const activeList =
+    tab === "priority"
+      ? filteredPriority
+      : tab === "review"
+        ? filteredReview
+        : [];
+
   return (
     <div className="space-y-6">
-      <section className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-semibold text-slate-500">Fila atual</p>
-          <p className="mt-2 text-3xl font-black text-slate-950">{queue.length.toLocaleString("pt-BR")}</p>
-          <p className="mt-1 text-xs text-slate-400">Candidatos à revisão</p>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-2xl border border-red-200 bg-red-50/50 p-5 shadow-sm">
+          <p className="text-sm font-semibold text-red-700">Prioridade</p>
+          <p className="mt-2 text-3xl font-black text-red-950">{priority.length.toLocaleString("pt-BR")}</p>
+          <p className="mt-1 text-xs text-red-600/70">Não segue + até {settings.maxFollowers.toLocaleString("pt-BR")} seguidores</p>
+        </div>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-5 shadow-sm">
+          <p className="text-sm font-semibold text-amber-700">Revisar</p>
+          <p className="mt-2 text-3xl font-black text-amber-950">{review.length.toLocaleString("pt-BR")}</p>
+          <p className="mt-1 text-xs text-amber-700/70">Contagem ainda desconhecida</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm font-semibold text-slate-500">Protegidos</p>
@@ -138,31 +196,57 @@ export function CleanupManager() {
       </section>
 
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">
             <div className="flex items-center gap-2 text-sm font-black text-slate-950">
-              <SlidersHorizontal size={18} className="text-blue-600" /> Regra ativa
+              <SlidersHorizontal size={18} className="text-blue-600" /> Regra principal
             </div>
-            <h2 className="mt-2 text-xl font-black text-slate-950">Não segue de volta → colocar na fila</h2>
+            <h2 className="mt-2 text-xl font-black text-slate-950">
+              Não segue de volta + poucos seguidores → prioridade
+            </h2>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              Perfis protegidos são sempre excluídos da fila. Nenhuma ação é executada automaticamente no Instagram.
+              Perfis protegidos são excluídos. Perfis acima do limite também ficam fora da fila prioritária.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={toggleRule}
-            className={`inline-flex min-w-36 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition ${
-              settings.notFollowingBack
-                ? "bg-emerald-600 text-white"
-                : "bg-slate-100 text-slate-600"
-            }`}
-          >
-            <CheckCircle2 size={17} /> {settings.notFollowingBack ? "Ativada" : "Desativada"}
-          </button>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-bold text-slate-500">Máximo de seguidores</span>
+              <input
+                type="number"
+                min={0}
+                step={100}
+                value={settings.maxFollowers}
+                onChange={(event) =>
+                  setSettings((current) => ({
+                    ...current,
+                    maxFollowers: Number(event.target.value),
+                  }))
+                }
+                onBlur={(event) => updateMaxFollowers(Number(event.target.value))}
+                className="w-40 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black outline-none focus:border-blue-400 focus:bg-white"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={toggleRule}
+              className={`inline-flex min-w-36 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition ${
+                settings.notFollowingBack
+                  ? "bg-emerald-600 text-white"
+                  : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              <CheckCircle2 size={17} /> {settings.notFollowingBack ? "Ativada" : "Desativada"}
+            </button>
+          </div>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-          A regra por quantidade de seguidores, como “menos de 2.000 seguidores”, ficará disponível quando tivermos uma fonte confiável para esse dado. O arquivo oficial exportado não fornece essa contagem para cada perfil.
+        <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            A regra já entende a contagem de seguidores. Agora precisamos enriquecer os perfis com dados confiáveis da Meta ou da extensão.
+          </span>
+          <Link href="/conectar" className="inline-flex shrink-0 items-center gap-2 font-black text-blue-700">
+            <Instagram size={16} /> Conectar Instagram
+          </Link>
         </div>
       </section>
 
@@ -199,13 +283,20 @@ export function CleanupManager() {
 
       <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b border-slate-200 p-6 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setTab("queue")}
-              className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "queue" ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}
+              onClick={() => setTab("priority")}
+              className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "priority" ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600"}`}
             >
-              Fila ({queue.length.toLocaleString("pt-BR")})
+              Prioridade ({priority.length.toLocaleString("pt-BR")})
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("review")}
+              className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "review" ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}
+            >
+              Revisar ({review.length.toLocaleString("pt-BR")})
             </button>
             <button
               type="button"
@@ -226,13 +317,45 @@ export function CleanupManager() {
           </div>
         </div>
 
-        {tab === "queue" ? (
+        {tab === "protected" ? (
           <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">
-            {filteredQueue.slice(0, 1000).map((item) => (
-              <div key={item.username} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+            {filteredProtected.map((item) => (
+              <div key={item.username} className="flex items-center justify-between gap-4 px-6 py-4">
                 <div className="min-w-0">
                   <p className="truncate font-black text-slate-900">@{item.username}</p>
-                  <p className="mt-1 text-xs text-slate-500">{item.reasons.join(" · ")}</p>
+                  <p className="mt-1 text-xs text-slate-500">Protegido neste dispositivo</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeProtected(item.username)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"
+                >
+                  <X size={14} /> Remover proteção
+                </button>
+              </div>
+            ))}
+            {!filteredProtected.length ? (
+              <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil protegido.</div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">
+            {activeList.slice(0, 1000).map((item) => (
+              <div key={item.username} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate font-black text-slate-900">@{item.username}</p>
+                    {typeof item.followersCount === "number" ? (
+                      <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-black text-red-700">
+                        {item.followersCount.toLocaleString("pt-BR")} seguidores
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">
+                        contagem pendente
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">{item.reasons.join(" · ")} · Fonte: {sourceLabel(item.dataSource)}</p>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   <a
@@ -253,29 +376,12 @@ export function CleanupManager() {
                 </div>
               </div>
             ))}
-            {!filteredQueue.length ? (
-              <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil corresponde à fila atual.</div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">
-            {filteredProtected.map((item) => (
-              <div key={item.username} className="flex items-center justify-between gap-4 px-6 py-4">
-                <div className="min-w-0">
-                  <p className="truncate font-black text-slate-900">@{item.username}</p>
-                  <p className="mt-1 text-xs text-slate-500">Protegido neste dispositivo</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeProtected(item.username)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"
-                >
-                  <X size={14} /> Remover proteção
-                </button>
+            {!activeList.length ? (
+              <div className="p-8 text-center text-sm text-slate-500">
+                {tab === "priority"
+                  ? "Nenhum perfil com contagem conhecida está dentro do limite atual."
+                  : "Nenhum perfil aguardando enriquecimento."}
               </div>
-            ))}
-            {!filteredProtected.length ? (
-              <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil protegido.</div>
             ) : null}
           </div>
         )}
