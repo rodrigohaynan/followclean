@@ -8,8 +8,10 @@ FollowClean analisa relacionamentos do Instagram a partir dos dados exportados p
 2. Identificar seguidores, seguindo, recíprocos e quem não segue de volta.
 3. Salvar snapshots localmente no navegador com IndexedDB.
 4. Comparar importações para mostrar novos seguidores e quem deixou de seguir.
-5. Evoluir para lista protegida, regras configuráveis e fila de limpeza assistida.
-6. Evoluir depois para uma extensão Chrome vinculada ao painel.
+5. Manter uma lista local de perfis protegidos.
+6. Aplicar a regra “não segue de volta + não está protegido = candidato à limpeza”.
+7. Montar uma fila de revisão com busca e acesso ao perfil no Instagram.
+8. Evoluir depois para regras adicionais e extensão Chrome vinculada ao painel.
 
 ## Stack
 
@@ -19,4 +21,4 @@ FollowClean analisa relacionamentos do Instagram a partir dos dados exportados p
 - Netlify
 - Extensão Chrome (fase posterior)
 
-O MVP atual não depende de banco externo. O sistema não solicita a senha do Instagram nem tenta contornar limitações, bloqueios ou mecanismos antiabuso da plataforma.
+O MVP atual não depende de banco externo. O sistema não solicita a senha do Instagram e não tenta contornar limitações, bloqueios ou mecanismos antiabuso da plataforma. A fila é assistida: o usuário continua responsável por cada ação realizada no Instagram.
