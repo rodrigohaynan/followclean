@@ -2,13 +2,15 @@ import type { InstagramAnalysis } from "@/lib/instagram/types";
 import {
   DEFAULT_CLEANUP_SETTINGS,
   type CleanupSettings,
+  type ProfileMetadata,
 } from "@/lib/rules/engine";
 
 const DB_NAME = "followclean";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const ANALYSES_STORE = "analyses";
 const PROTECTED_STORE = "protected_profiles";
 const SETTINGS_STORE = "settings";
+const PROFILE_METADATA_STORE = "profile_metadata";
 
 export type StoredAnalysis = {
   id: string;
@@ -45,6 +47,13 @@ function openDatabase(): Promise<IDBDatabase> {
 
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
         db.createObjectStore(SETTINGS_STORE, { keyPath: "id" });
+      }
+
+      if (!db.objectStoreNames.contains(PROFILE_METADATA_STORE)) {
+        const store = db.createObjectStore(PROFILE_METADATA_STORE, {
+          keyPath: "username",
+        });
+        store.createIndex("updatedAt", "updatedAt", { unique: false });
       }
     };
 
@@ -146,19 +155,89 @@ export async function unprotectProfile(username: string): Promise<void> {
   db.close();
 }
 
+export async function getProfileMetadata(): Promise<ProfileMetadata[]> {
+  const db = await openDatabase();
+  const tx = db.transaction(PROFILE_METADATA_STORE, "readonly");
+  const records = await requestToPromise(
+    tx.objectStore(PROFILE_METADATA_STORE).getAll() as IDBRequest<ProfileMetadata[]>,
+  );
+  db.close();
+  return records;
+}
+
+export async function upsertProfileMetadata(
+  input: Omit<ProfileMetadata, "username" | "updatedAt"> & {
+    username: string;
+    updatedAt?: string;
+  },
+): Promise<ProfileMetadata> {
+  const username = normalizeUsername(input.username);
+  if (!username) throw new Error("Informe um usuário válido.");
+
+  const record: ProfileMetadata = {
+    ...input,
+    username,
+    updatedAt: input.updatedAt ?? new Date().toISOString(),
+  };
+
+  const db = await openDatabase();
+  const tx = db.transaction(PROFILE_METADATA_STORE, "readwrite");
+  await requestToPromise(tx.objectStore(PROFILE_METADATA_STORE).put(record));
+  db.close();
+  return record;
+}
+
+export async function upsertProfileMetadataBatch(
+  records: Array<
+    Omit<ProfileMetadata, "username" | "updatedAt"> & {
+      username: string;
+      updatedAt?: string;
+    }
+  >,
+): Promise<void> {
+  if (!records.length) return;
+  const db = await openDatabase();
+  const tx = db.transaction(PROFILE_METADATA_STORE, "readwrite");
+  const store = tx.objectStore(PROFILE_METADATA_STORE);
+
+  for (const item of records) {
+    const username = normalizeUsername(item.username);
+    if (!username) continue;
+    store.put({
+      ...item,
+      username,
+      updatedAt: item.updatedAt ?? new Date().toISOString(),
+    } satisfies ProfileMetadata);
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("Falha ao salvar metadados."));
+    tx.onabort = () => reject(tx.error ?? new Error("Operação cancelada."));
+  });
+  db.close();
+}
+
 export async function getCleanupSettings(): Promise<CleanupSettings> {
   const db = await openDatabase();
   const tx = db.transaction(SETTINGS_STORE, "readonly");
   const record = await requestToPromise(
     tx.objectStore(SETTINGS_STORE).get("cleanup") as IDBRequest<
-      StoredCleanupSettings | undefined
+      Partial<StoredCleanupSettings> | undefined
     >,
   );
   db.close();
 
-  return record
-    ? { notFollowingBack: record.notFollowingBack }
-    : DEFAULT_CLEANUP_SETTINGS;
+  return {
+    notFollowingBack:
+      typeof record?.notFollowingBack === "boolean"
+        ? record.notFollowingBack
+        : DEFAULT_CLEANUP_SETTINGS.notFollowingBack,
+    maxFollowers:
+      typeof record?.maxFollowers === "number"
+        ? record.maxFollowers
+        : DEFAULT_CLEANUP_SETTINGS.maxFollowers,
+  };
 }
 
 export async function saveCleanupSettings(
