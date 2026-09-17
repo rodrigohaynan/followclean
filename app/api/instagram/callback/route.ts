@@ -38,7 +38,11 @@ export async function GET(request: NextRequest) {
       cache: "no-store",
     });
 
-    if (!shortTokenResponse.ok) throw new Error("Falha ao trocar o código por token.");
+    if (!shortTokenResponse.ok) {
+      const details = await shortTokenResponse.text();
+      console.error("[Instagram OAuth] Falha na troca do código por token:", shortTokenResponse.status, details);
+      throw new Error("Falha ao trocar o código por token.");
+    }
 
     const shortToken = (await shortTokenResponse.json()) as {
       access_token: string;
@@ -66,7 +70,11 @@ export async function GET(request: NextRequest) {
       cache: "no-store",
     });
 
-    if (!profileResponse.ok) throw new Error("Falha ao carregar o perfil conectado.");
+    if (!profileResponse.ok) {
+      const details = await profileResponse.text();
+      console.error("[Instagram OAuth] Falha ao carregar perfil:", profileResponse.status, details);
+      throw new Error("Falha ao carregar o perfil conectado.");
+    }
 
     const profile = (await profileResponse.json()) as {
       id?: string;
@@ -107,7 +115,8 @@ export async function GET(request: NextRequest) {
       maxAge: Math.min(longToken.expires_in ?? 3600, 60 * 60 * 24 * 60),
     });
     return response;
-  } catch {
+  } catch (error) {
+    console.error("[Instagram OAuth] Callback falhou:", error);
     const response = redirectWithStatus(request, "error");
     response.cookies.delete(OAUTH_STATE_COOKIE);
     return response;
