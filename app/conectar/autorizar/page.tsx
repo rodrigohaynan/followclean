@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { ArrowLeft, Camera, Chrome, ExternalLink, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Camera, ExternalLink, ShieldCheck } from "lucide-react";
 
 const OAUTH_STATE_COOKIE = "followclean_ig_oauth_state";
 
@@ -65,7 +65,7 @@ export default async function AutorizarInstagramPage() {
           href={chromeIntent}
           className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3.5 font-black text-white"
         >
-          <Chrome size={19} /> Continuar no Chrome
+          <ExternalLink size={19} /> Continuar no Chrome
         </a>
 
         <a
