@@ -20,7 +20,8 @@
     const stored = await chrome.storage.local.get([
       "followcleanResults",
       "followcleanQueue",
-      "followcleanQueueUpdatedAt"
+      "followcleanQueueUpdatedAt",
+      "followcleanBatch"
     ]);
 
     const results = Object.values(stored.followcleanResults || {});
@@ -29,7 +30,8 @@
       queueTotal: Array.isArray(stored.followcleanQueue)
         ? stored.followcleanQueue.length
         : 0,
-      queueUpdatedAt: stored.followcleanQueueUpdatedAt || null
+      queueUpdatedAt: stored.followcleanQueueUpdatedAt || null,
+      batch: stored.followcleanBatch || null
     });
   }
 
@@ -58,12 +60,47 @@
       return;
     }
 
+    if (message.type === "START_BATCH") {
+      const response = await chrome.runtime.sendMessage({
+        type: "FOLLOWCLEAN_START_BATCH"
+      });
+      post("BATCH_ACTION", {
+        action: "start",
+        ok: Boolean(response?.ok)
+      });
+      await sendResults();
+      return;
+    }
+
+    if (message.type === "PAUSE_BATCH") {
+      const response = await chrome.runtime.sendMessage({
+        type: "FOLLOWCLEAN_PAUSE_BATCH"
+      });
+      post("BATCH_ACTION", {
+        action: "pause",
+        ok: Boolean(response?.ok)
+      });
+      await sendResults();
+      return;
+    }
+
     if (message.type === "CLEAR_QUEUE") {
       await chrome.storage.local.remove([
         "followcleanQueue",
         "followcleanQueueUpdatedAt"
       ]);
       post("QUEUE_SAVED", { total: 0 });
+    }
+  });
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local") return;
+    if (
+      changes.followcleanResults ||
+      changes.followcleanBatch ||
+      changes.followcleanQueue
+    ) {
+      void sendResults();
     }
   });
 
