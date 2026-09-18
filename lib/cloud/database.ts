@@ -1,26 +1,36 @@
-import { getDatabase } from "@netlify/database";
+import { neon } from "@neondatabase/serverless";
 
-type QueryableSql = ReturnType<typeof getDatabase>["sql"] & {
-  query: (text: string, params?: unknown[]) => Promise<Record<string, unknown>[]>;
+type QueryResult = Record<string, unknown>[];
+
+type CloudSql = ReturnType<typeof neon> & {
+  query: (text: string, params?: unknown[]) => Promise<QueryResult>;
 };
 
 let schemaReady: Promise<void> | null = null;
-let sqlClient: QueryableSql | null = null;
+let sqlClient: CloudSql | null = null;
 
 export function cloudDatabaseConfigured() {
-  // Netlify Database is provisioned and connected automatically in production.
-  return true;
+  return Boolean(
+    process.env.FOLLOWCLEAN_DATABASE_URL?.trim() ||
+    process.env.DATABASE_URL?.trim(),
+  );
 }
 
-export function getCloudSql(): QueryableSql {
+export function getCloudSql(): CloudSql {
   if (sqlClient) return sqlClient;
 
-  const database = getDatabase();
-  const sql = database.sql as QueryableSql;
+  const url =
+    process.env.FOLLOWCLEAN_DATABASE_URL?.trim() ||
+    process.env.DATABASE_URL?.trim();
 
+  if (!url) {
+    throw new Error("FOLLOWCLEAN_DATABASE_URL não configurada.");
+  }
+
+  const sql = neon(url) as CloudSql;
   sql.query = async (text: string, params: unknown[] = []) => {
-    const result = await database.pool.query(text, params);
-    return result.rows as Record<string, unknown>[];
+    const rows = await neon(url).query(text, params);
+    return rows as QueryResult;
   };
 
   sqlClient = sql;
