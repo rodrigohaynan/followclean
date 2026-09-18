@@ -23,6 +23,7 @@ import androidx.webkit.WebViewFeature
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
+import java.util.UUID
 
 class MainActivity : Activity() {
     private lateinit var mainWebView: WebView
@@ -39,6 +40,7 @@ class MainActivity : Activity() {
     private var currentUsername: String? = null
     private var extractionAttempts = 0
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private var oauthRedeemAttempts = 0
 
     private val maxProfilesPerRun = 30
     private val betweenProfilesMs = 12_000L
@@ -92,6 +94,17 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+
+        if (
+            ::mainWebView.isInitialized &&
+            prefs.getBoolean("oauth_pending", false)
+        ) {
+            handler.postDelayed({ redeemAndroidSession() }, 700L)
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun configureMainWebView() {
         mainWebView.settings.apply {
@@ -107,7 +120,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.3"
+                "FollowCleanAndroid/0.3.4"
         }
 
         CookieManager.getInstance().apply {
@@ -213,6 +226,19 @@ class MainActivity : Activity() {
 
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
+
+                if (url.contains("/conectar?status=connected")) {
+                    prefs.edit().putBoolean("oauth_pending", false).apply()
+                    oauthRedeemAttempts = 0
+                    updateStatus("Instagram conectado com sucesso.")
+                } else if (
+                    url.contains("/conectar?status=android_waiting") &&
+                    prefs.getBoolean("oauth_pending", false) &&
+                    oauthRedeemAttempts < 8
+                ) {
+                    handler.postDelayed({ redeemAndroidSession() }, 2_500L)
+                }
+
                 if (url.startsWith("https://followclean.netlify.app")) {
                     sendReadyToWeb()
                     sendResultsToWeb()
@@ -267,7 +293,11 @@ class MainActivity : Activity() {
             host == "followclean.netlify.app" &&
             uri.path.orEmpty() == "/api/instagram/connect"
         ) {
-            view.loadUrl("https://followclean.netlify.app/api/instagram/android-connect")
+            val deviceKey = ensureOAuthDeviceKey()
+            val connectUrl =
+                "https://followclean.netlify.app/api/instagram/android-connect?deviceKey=" +
+                    Uri.encode(deviceKey)
+            view.loadUrl(connectUrl)
             updateStatus("Preparando conexão segura com o Instagram...")
             return true
         }
@@ -316,6 +346,9 @@ class MainActivity : Activity() {
     }
 
     private fun openOAuthInBrowser(uri: Uri) {
+        oauthRedeemAttempts = 0
+        prefs.edit().putBoolean("oauth_pending", true).apply()
+
         val chromeIntent = Intent(Intent.ACTION_VIEW, uri).apply {
             setPackage("com.android.chrome")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -356,10 +389,7 @@ class MainActivity : Activity() {
 
         val handoff = data.getQueryParameter("handoff")
         if (handoff.isNullOrBlank()) {
-            updateStatus("Retorno do Instagram inválido. Inicie a conexão novamente.")
-            mainWebView.loadUrl(
-                "https://followclean.netlify.app/conectar?status=android_handoff_error"
-            )
+            redeemAndroidSession()
             return true
         }
 
@@ -375,6 +405,36 @@ class MainActivity : Activity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIncomingIntent(intent)
+    }
+
+    private fun ensureOAuthDeviceKey(): String {
+        val existing = prefs.getString("oauth_device_key", null)
+        if (!existing.isNullOrBlank()) return existing
+
+        val generated = UUID.randomUUID().toString()
+        prefs.edit().putString("oauth_device_key", generated).apply()
+        return generated
+    }
+
+    private fun redeemAndroidSession() {
+        if (!::mainWebView.isInitialized) return
+        if (!prefs.getBoolean("oauth_pending", false)) return
+
+        if (oauthRedeemAttempts >= 8) {
+            updateStatus(
+                "A autorização ainda não chegou ao aplicativo. Volte ao navegador e confirme se o Instagram foi autorizado."
+            )
+            return
+        }
+
+        oauthRedeemAttempts++
+        val deviceKey = ensureOAuthDeviceKey()
+        val redeemUrl =
+            "https://followclean.netlify.app/api/instagram/android-redeem?deviceKey=" +
+                Uri.encode(deviceKey)
+
+        updateStatus("Buscando autorização concluída no servidor...")
+        mainWebView.loadUrl(redeemUrl)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -576,7 +636,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.3")
+                .put("version", "0.3.4")
         )
     }
 
