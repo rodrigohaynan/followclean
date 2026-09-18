@@ -60,6 +60,15 @@ export async function ensureCloudSchema() {
         PRIMARY KEY (owner_id, device_id)
       )
     `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS followclean_run_lock (
+        owner_id TEXT PRIMARY KEY,
+        active_device_id TEXT NOT NULL,
+        lease_until TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
   })();
 
   return schemaReady;
