@@ -5,19 +5,36 @@ plugins {
 
 android {
     namespace = "br.com.followclean.app"
+
+    val signingFilePath = System.getenv("FOLLOWCLEAN_SIGNING_FILE")
+    val signingPassword = System.getenv("FOLLOWCLEAN_SIGNING_PASSWORD")
+    val followCleanSigning =
+        if (!signingFilePath.isNullOrBlank() && !signingPassword.isNullOrBlank()) {
+            signingConfigs.create("followcleanRelease") {
+                storeFile = file(signingFilePath)
+                storePassword = signingPassword
+                keyAlias = "followclean"
+                keyPassword = signingPassword
+            }
+        } else {
+            null
+        }
     compileSdk = 35
 
     defaultConfig {
         applicationId = "br.com.followclean.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 18
-        versionName = "0.3.12"
+        versionCode = 19
+        versionName = "0.3.13"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (followCleanSigning != null) {
+                signingConfig = followCleanSigning
+            }
         }
     }
 
