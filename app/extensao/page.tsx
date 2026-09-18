@@ -55,17 +55,18 @@ export default function ExtensaoPage() {
               </div>
               <div>
                 <h2 className="font-black text-slate-950">Chrome / Edge no computador</h2>
-                <p className="text-sm text-slate-500">Primeira versão instalável manualmente</p>
+                <p className="text-sm text-slate-500">FollowClean Assist v0.4.1</p>
               </div>
             </div>
 
             <ol className="mt-5 space-y-3 text-sm leading-6 text-slate-700">
-              <li><strong>1.</strong> Baixe o projeto e extraia o arquivo ZIP.</li>
-              <li><strong>2.</strong> Abra <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">chrome://extensions</code>.</li>
-              <li><strong>3.</strong> Ative o <strong>Modo do desenvolvedor</strong>.</li>
-              <li><strong>4.</strong> Clique em <strong>Carregar sem compactação</strong> e selecione a pasta <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">extension</code>.</li>
-              <li><strong>5.</strong> Volte à página Limpeza e clique em <strong>Iniciar verificação contínua</strong>.</li>
-              <li><strong>6.</strong> Para deixar durante a madrugada, mantenha o Chrome e o computador ligados; a extensão salva checkpoints e retoma após reinicialização do Chrome.</li>
+              <li><strong>1.</strong> Se a extensão já está instalada, <strong>não remova</strong>. Isso ajuda a preservar os resultados locais já capturados.</li>
+              <li><strong>2.</strong> Baixe o projeto atualizado e extraia o ZIP.</li>
+              <li><strong>3.</strong> Copie os arquivos da nova pasta <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">extension</code> sobre a <strong>mesma pasta</strong> usada pela extensão atual.</li>
+              <li><strong>4.</strong> Abra <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">chrome://extensions</code> e clique em <strong>Recarregar</strong> no FollowClean Assist.</li>
+              <li><strong>5.</strong> Confirme que aparece a versão <strong>0.4.1</strong> e que não há erros.</li>
+              <li><strong>6.</strong> Volte à página Limpeza e clique em <strong>Sincronizar</strong> antes de iniciar a verificação contínua.</li>
+              <li><strong>7.</strong> Para deixar durante a madrugada, mantenha o Chrome e o computador ligados; a extensão salva checkpoints e retoma após reinicialização do Chrome.</li>
             </ol>
 
             <a
