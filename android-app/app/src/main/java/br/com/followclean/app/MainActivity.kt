@@ -871,43 +871,165 @@ class MainActivity : Activity() {
         private const val FILE_CHOOSER_REQUEST = 9012
         private val EXTRACT_SCRIPT = """
             (() => {
-              function parseHumanCount(raw) {
-                if (!raw) return null;
-                const text = String(raw)
+              function normalizeText(value) {
+                return String(value || "")
                   .trim()
                   .toLowerCase()
-                  .replace(/\\u00a0/g, " ")
-                  .replace(/\\s+/g, " ");
+                  .replace(/\u00a0/g, " ")
+                  .replace(/\s+/g, " ");
+              }
 
-                let multiplier = 1;
-                if (/\\b(k|mil|thousand)\\b/.test(text)) multiplier = 1000;
-                if (/\\b(m|mi|million|millions|milhão|milhoes|milhões)\\b/.test(text)) multiplier = 1000000;
-                if (/\\b(b|billion|billions|bilhão|bilhoes|bilhões)\\b/.test(text)) multiplier = 1000000000;
+              function hasScaleUnit(raw) {
+                const text = normalizeText(raw);
+                return /(?:^|\s|\d)(?:k|mil|milhao|milhão|milhoes|milhões|m|mi|million|millions|b|bilhao|bilhão|bilhoes|bilhões|billion|billions|thousand)(?:\s|$|\b)/i.test(text);
+              }
 
-                const token = text.match(/[\\d.,]+/)?.[0];
+              function detectMultiplier(raw) {
+                const text = normalizeText(raw);
+                if (/(?:\b|\d)(b|bilhao|bilhão|bilhoes|bilhões|billion|billions)\b/i.test(text)) {
+                  return 1000000000;
+                }
+                if (/(?:\b|\d)(m|mi|milhao|milhão|milhoes|milhões|million|millions)\b/i.test(text)) {
+                  return 1000000;
+                }
+                if (/(?:\b|\d)(k|mil|thousand)\b/i.test(text)) {
+                  return 1000;
+                }
+                return 1;
+              }
+
+              function parseHumanCount(raw) {
+                if (!raw) return null;
+                const text = normalizeText(raw);
+                const token = text.match(/[\d.,]+/)?.[0];
                 if (!token) return null;
 
-                if (multiplier > 1) {
-                  let normalized = token;
-                  if (normalized.includes(",") && normalized.includes(".")) {
-                    const lastComma = normalized.lastIndexOf(",");
-                    const lastDot = normalized.lastIndexOf(".");
-                    const decimal = lastComma > lastDot ? "," : ".";
-                    normalized = normalized
-                      .replace(decimal === "," ? /\\./g : /,/g, "")
-                      .replace(decimal, ".");
-                  } else if (normalized.includes(",")) {
-                    normalized = normalized.replace(",", ".");
-                  }
+                const multiplier = detectMultiplier(text);
+                let normalized = token.replace(/\s/g, "");
 
-                  const value = Number.parseFloat(normalized);
-                  return Number.isFinite(value) ? Math.round(value * multiplier) : null;
+                if (multiplier === 1) {
+                  const digits = normalized.replace(/\D/g, "");
+                  if (!digits) return null;
+                  const value = Number.parseInt(digits, 10);
+                  return Number.isFinite(value) ? value : null;
                 }
 
-                const digits = token.replace(/\\D/g, "");
-                if (!digits) return null;
-                const value = Number.parseInt(digits, 10);
-                return Number.isFinite(value) ? value : null;
+                if (normalized.includes(",") && normalized.includes(".")) {
+                  const lastComma = normalized.lastIndexOf(",");
+                  const lastDot = normalized.lastIndexOf(".");
+                  const decimal = lastComma > lastDot ? "," : ".";
+                  normalized = normalized
+                    .replace(decimal === "," ? /\./g : /,/g, "")
+                    .replace(decimal, ".");
+                } else if (normalized.includes(",")) {
+                  normalized = normalized.replace(",", ".");
+                }
+
+                const value = Number.parseFloat(normalized);
+                return Number.isFinite(value)
+                  ? Math.round(value * multiplier)
+                  : null;
+              }
+
+              function detectUnavailable() {
+                const text = normalizeText(
+                  [document.title, document.body?.innerText || ""].join(" ")
+                );
+
+                const phrases = [
+                  "sorry, this page isn't available",
+                  "page isn't available",
+                  "the link you followed may be broken",
+                  "esta página não está disponível",
+                  "esta pagina nao esta disponivel",
+                  "página não disponível",
+                  "pagina nao disponivel",
+                  "usuário não encontrado",
+                  "usuario nao encontrado",
+                  "user not found"
+                ];
+
+                return phrases.some((phrase) => text.includes(phrase));
+              }
+
+              function fromMeta() {
+                const meta =
+                  document.querySelector('meta[property="og:description"]') ||
+                  document.querySelector('meta[name="description"]');
+                const content = meta?.getAttribute("content") || "";
+                const match = content.match(
+                  /([\d.,]+(?:\s*(?:k|m|b|mil|mi|milhao|milhão|milhoes|milhões|thousand|million|millions|billion|billions|bilhao|bilhão|bilhoes|bilhões))?)\s+(?:de\s+)?(?:followers|seguidores)/i
+                );
+                return match ? parseHumanCount(match[1]) : null;
+              }
+
+              function fromFollowerLinks() {
+                const links = [
+                  ...document.querySelectorAll(
+                    'a[href*="/followers/"], a[href$="/followers"]'
+                  )
+                ];
+
+                for (const link of links) {
+                  const title =
+                    link.querySelector("[title]")?.getAttribute("title") ||
+                    link.getAttribute("title") ||
+                    "";
+                  const text = link.textContent || "";
+                  const parsedTitle = parseHumanCount(title);
+                  const parsedText = parseHumanCount(text);
+
+                  if (hasScaleUnit(text) && typeof parsedText === "number") {
+                    return parsedText;
+                  }
+                  if (typeof parsedTitle === "number") return parsedTitle;
+                  if (typeof parsedText === "number") return parsedText;
+                }
+
+                return null;
+              }
+
+              function fromVisibleText() {
+                const candidates = [
+                  ...document.querySelectorAll("header li, header span, main span, main a")
+                ];
+
+                for (const node of candidates) {
+                  const text = (node.textContent || "").trim();
+                  if (!/(followers|seguidores)/i.test(text)) continue;
+                  const value = parseHumanCount(text);
+                  if (typeof value === "number") return value;
+                }
+
+                const bodyText = document.body?.innerText || "";
+                const match = bodyText.match(
+                  /([\d.,]+(?:\s*(?:k|m|b|mil|mi|milhao|milhão|milhoes|milhões|thousand|million|millions|billion|billions|bilhao|bilhão|bilhoes|bilhões))?)\s+(?:de\s+)?(?:followers|seguidores)/i
+                );
+                return match ? parseHumanCount(match[1]) : null;
+              }
+
+              function fromEmbeddedJson() {
+                const scripts = [...document.scripts];
+                const patterns = [
+                  /"edge_followed_by"\s*:\s*\{[^{}]*"count"\s*:\s*(\d+)/i,
+                  /"follower_count"\s*:\s*(\d+)/i,
+                  /"followers_count"\s*:\s*(\d+)/i,
+                  /"followerCount"\s*:\s*(\d+)/i
+                ];
+
+                for (const script of scripts) {
+                  const text = script.textContent || "";
+                  if (!text) continue;
+
+                  for (const pattern of patterns) {
+                    const match = text.match(pattern);
+                    if (!match) continue;
+                    const value = Number.parseInt(match[1], 10);
+                    if (Number.isFinite(value)) return value;
+                  }
+                }
+
+                return null;
               }
 
               const path = location.pathname.toLowerCase();
@@ -919,46 +1041,22 @@ class MainActivity : Activity() {
               const username =
                 location.pathname.split("/").filter(Boolean)[0]?.toLowerCase() || "";
 
-              let followersCount = null;
+              const unavailable = detectUnavailable();
 
-              const meta =
-                document.querySelector('meta[property="og:description"]') ||
-                document.querySelector('meta[name="description"]');
-              const content = meta?.getAttribute("content") || "";
-              const metaMatch = content.match(
-                /([\\d.,]+(?:\\s*(?:k|m|b|mil|mi|thousand|million|millions|milhão|milhoes|milhões))?)\\s+(?:followers|seguidores)/i
-              );
-              if (metaMatch) followersCount = parseHumanCount(metaMatch[1]);
-
-              if (followersCount === null) {
-                const links = [
-                  ...document.querySelectorAll(
-                    'a[href*="/followers/"], a[href$="/followers"]'
-                  )
-                ];
-
-                for (const link of links) {
-                  const title =
-                    link.querySelector("[title]")?.getAttribute("title") ||
-                    link.getAttribute("title");
-                  followersCount = parseHumanCount(title) ?? parseHumanCount(link.textContent || "");
-                  if (followersCount !== null) break;
-                }
-              }
-
-              if (followersCount === null) {
-                for (const node of document.querySelectorAll("header li, header span")) {
-                  const text = (node.textContent || "").trim();
-                  if (!/(followers|seguidores)/i.test(text)) continue;
-                  followersCount = parseHumanCount(text);
-                  if (followersCount !== null) break;
-                }
-              }
+              const followersCount = unavailable
+                ? null
+                : (
+                    fromMeta() ??
+                    fromFollowerLinks() ??
+                    fromVisibleText() ??
+                    fromEmbeddedJson()
+                  );
 
               return JSON.stringify({
                 username,
                 followersCount,
-                blocked
+                blocked,
+                unavailable
               });
             })();
         """.trimIndent()
