@@ -107,7 +107,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.2"
+                "FollowCleanAndroid/0.3.3"
         }
 
         CookieManager.getInstance().apply {
@@ -261,6 +261,16 @@ class MainActivity : Activity() {
         }
 
         val host = uri.host.orEmpty().lowercase()
+
+        if (
+            (scheme == "https" || scheme == "http") &&
+            host == "followclean.netlify.app" &&
+            uri.path.orEmpty() == "/api/instagram/connect"
+        ) {
+            view.loadUrl("https://followclean.netlify.app/api/instagram/android-connect")
+            updateStatus("Preparando conexão segura com o Instagram...")
+            return true
+        }
 
         if (
             (scheme == "https" || scheme == "http") &&
@@ -566,7 +576,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.2")
+                .put("version", "0.3.3")
         )
     }
 
