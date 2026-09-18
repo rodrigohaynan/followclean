@@ -55,6 +55,25 @@
       return;
     }
 
+    if (message.type === "SET_QUEUE_AND_START") {
+      const queue = normalizeUsernames(message.usernames);
+      await chrome.storage.local.set({
+        followcleanQueue: queue,
+        followcleanQueueUpdatedAt: new Date().toISOString()
+      });
+      post("QUEUE_SAVED", { total: queue.length });
+
+      const response = await chrome.runtime.sendMessage({
+        type: "FOLLOWCLEAN_START_BATCH"
+      });
+      post("BATCH_ACTION", {
+        action: "start",
+        ok: Boolean(response?.ok)
+      });
+      await sendResults();
+      return;
+    }
+
     if (message.type === "GET_RESULTS") {
       await sendResults();
       return;
