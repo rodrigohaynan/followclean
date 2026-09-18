@@ -1,7 +1,8 @@
 async function loadState() {
   const stored = await chrome.storage.local.get([
     "followcleanQueue",
-    "followcleanResults"
+    "followcleanResults",
+    "followcleanBatch"
   ]);
 
   const queue = Array.isArray(stored.followcleanQueue)
@@ -9,11 +10,34 @@ async function loadState() {
     : [];
   const results = stored.followcleanResults || {};
   const pending = queue.filter((username) => !results[username]);
+  const batch = stored.followcleanBatch || {
+    running: false,
+    processedThisRun: 0,
+    currentUsername: null,
+    lastMessage: "Parado"
+  };
 
   document.getElementById("queueTotal").textContent = queue.length;
   document.getElementById("capturedTotal").textContent =
     Object.keys(results).length;
   document.getElementById("pendingTotal").textContent = pending.length;
+
+  const batchStatus = document.getElementById("batchStatus");
+  const batchMessage = document.getElementById("batchMessage");
+  const batchProgress = document.getElementById("batchProgress");
+  const startBatch = document.getElementById("startBatch");
+  const pauseBatch = document.getElementById("pauseBatch");
+
+  batchStatus.textContent = batch.running
+    ? batch.currentUsername
+      ? "@" + batch.currentUsername
+      : "Em execução"
+    : "Parado";
+  batchMessage.textContent = batch.lastMessage || "Parado";
+  batchProgress.style.width =
+    Math.min(100, ((batch.processedThisRun || 0) / 50) * 100) + "%";
+  startBatch.disabled = batch.running || pending.length === 0;
+  pauseBatch.disabled = !batch.running;
 
   const next = pending[0];
   const usernameEl = document.getElementById("nextUsername");
@@ -70,3 +94,18 @@ document.getElementById("openFollowClean").addEventListener("click", async () =>
 
 chrome.storage.onChanged.addListener(() => loadState());
 loadState();
+
+
+document.getElementById("startBatch").addEventListener("click", async () => {
+  const response = await chrome.runtime.sendMessage({
+    type: "FOLLOWCLEAN_START_BATCH"
+  });
+  if (response?.ok) await loadState();
+});
+
+document.getElementById("pauseBatch").addEventListener("click", async () => {
+  const response = await chrome.runtime.sendMessage({
+    type: "FOLLOWCLEAN_PAUSE_BATCH"
+  });
+  if (response?.ok) await loadState();
+});
