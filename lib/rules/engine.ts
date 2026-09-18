@@ -13,6 +13,7 @@ export type ProfileMetadata = {
   accountType?: string;
   dataSource: ProfileDataSource;
   updatedAt: string;
+  parserVersion?: number;
 };
 
 export type CleanupSettings = {
@@ -51,9 +52,13 @@ export function buildCleanupQueue(
 
   return analysis.notFollowingBack
     .filter((username) => !protectedSet.has(username.toLowerCase()))
+    .filter((username) => !username.toLowerCase().startsWith("__deleted__"))
     .flatMap((username): CleanupCandidate[] => {
       const profile = metadataMap.get(username.toLowerCase());
-      const followersCount = profile?.followersCount;
+      const profileIsUsable =
+        profile?.dataSource !== "extension" ||
+        (profile.parserVersion ?? 0) >= 2;
+      const followersCount = profileIsUsable ? profile?.followersCount : undefined;
 
       if (typeof followersCount === "number" && followersCount > settings.maxFollowers) {
         return [];
@@ -64,8 +69,8 @@ export function buildCleanupQueue(
         {
           username,
           followersCount,
-          accountType: profile?.accountType,
-          dataSource: profile?.dataSource ?? "unknown",
+          accountType: profileIsUsable ? profile?.accountType : undefined,
+          dataSource: profileIsUsable ? (profile?.dataSource ?? "unknown") : "unknown",
           classification: knownCount ? "priority" : "review",
           reasons: knownCount
             ? [
