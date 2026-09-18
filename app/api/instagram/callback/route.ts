@@ -5,7 +5,9 @@ const OAUTH_STATE_COOKIE = "followclean_ig_oauth_state";
 const SESSION_COOKIE = "followclean_ig_session";
 
 function redirectWithStatus(request: NextRequest, status: string) {
-  return NextResponse.redirect(new URL(`/conectar?status=${encodeURIComponent(status)}`, request.url));
+  return NextResponse.redirect(
+    new URL(`/conectar?status=${encodeURIComponent(status)}`, request.url),
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -24,6 +26,9 @@ export async function GET(request: NextRequest) {
     process.env.INSTAGRAM_REDIRECT_URI ??
     `${request.nextUrl.origin}/api/instagram/callback`;
 
+  let accessToken = "";
+  let expiresIn = 3600;
+
   try {
     const tokenBody = new FormData();
     tokenBody.set("client_id", appId);
@@ -40,40 +45,59 @@ export async function GET(request: NextRequest) {
 
     if (!shortTokenResponse.ok) {
       const details = await shortTokenResponse.text();
-      console.error("[Instagram OAuth] Falha na troca do código por token:", shortTokenResponse.status, details);
-      throw new Error("Falha ao trocar o código por token.");
+      console.error("[Instagram OAuth] token_exchange_error", shortTokenResponse.status, details);
+      const response = redirectWithStatus(request, "token_exchange_error");
+      response.cookies.delete(OAUTH_STATE_COOKIE);
+      return response;
     }
 
     const shortToken = (await shortTokenResponse.json()) as {
-      access_token: string;
+      access_token?: string;
       user_id?: number | string;
     };
+
+    if (!shortToken.access_token) {
+      console.error("[Instagram OAuth] token_missing");
+      const response = redirectWithStatus(request, "token_exchange_error");
+      response.cookies.delete(OAUTH_STATE_COOKIE);
+      return response;
+    }
+
+    accessToken = shortToken.access_token;
 
     const longTokenUrl = new URL("https://graph.instagram.com/access_token");
     longTokenUrl.searchParams.set("grant_type", "ig_exchange_token");
     longTokenUrl.searchParams.set("client_secret", appSecret);
-    longTokenUrl.searchParams.set("access_token", shortToken.access_token);
+    longTokenUrl.searchParams.set("access_token", accessToken);
 
     const longTokenResponse = await fetch(longTokenUrl, { cache: "no-store" });
-    const longToken = longTokenResponse.ok
-      ? ((await longTokenResponse.json()) as { access_token: string; expires_in?: number })
-      : { access_token: shortToken.access_token, expires_in: 3600 };
+    if (longTokenResponse.ok) {
+      const longToken = (await longTokenResponse.json()) as {
+        access_token?: string;
+        expires_in?: number;
+      };
+      if (longToken.access_token) accessToken = longToken.access_token;
+      if (typeof longToken.expires_in === "number") expiresIn = longToken.expires_in;
+    } else {
+      const details = await longTokenResponse.text();
+      console.warn("[Instagram OAuth] long_token_exchange_failed; using short token", longTokenResponse.status, details);
+    }
 
     const profileUrl = new URL("https://graph.instagram.com/v26.0/me");
     profileUrl.searchParams.set(
       "fields",
       "user_id,username,account_type,profile_picture_url,followers_count,follows_count",
     );
+    profileUrl.searchParams.set("access_token", accessToken);
 
-    const profileResponse = await fetch(profileUrl, {
-      headers: { Authorization: `Bearer ${longToken.access_token}` },
-      cache: "no-store",
-    });
+    const profileResponse = await fetch(profileUrl, { cache: "no-store" });
 
     if (!profileResponse.ok) {
       const details = await profileResponse.text();
-      console.error("[Instagram OAuth] Falha ao carregar perfil:", profileResponse.status, details);
-      throw new Error("Falha ao carregar o perfil conectado.");
+      console.error("[Instagram OAuth] profile_error", profileResponse.status, details);
+      const response = redirectWithStatus(request, "profile_error");
+      response.cookies.delete(OAUTH_STATE_COOKIE);
+      return response;
     }
 
     const profile = (await profileResponse.json()) as {
@@ -86,24 +110,35 @@ export async function GET(request: NextRequest) {
       follows_count?: number;
     };
 
-    if (!profile.username) throw new Error("A Meta não retornou o nome de usuário.");
+    if (!profile.username) {
+      console.error("[Instagram OAuth] profile_missing_username", profile);
+      const response = redirectWithStatus(request, "profile_error");
+      response.cookies.delete(OAUTH_STATE_COOKIE);
+      return response;
+    }
 
-    const expiresAt = longToken.expires_in
-      ? new Date(Date.now() + longToken.expires_in * 1000).toISOString()
-      : undefined;
+    const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
-    const sealed = await sealInstagramSession({
-      accessToken: longToken.access_token,
-      expiresAt,
-      account: {
-        id: String(profile.user_id ?? profile.id ?? shortToken.user_id ?? ""),
-        username: profile.username,
-        accountType: profile.account_type,
-        profilePictureUrl: profile.profile_picture_url,
-        followersCount: profile.followers_count,
-        followsCount: profile.follows_count,
-      },
-    });
+    let sealed: string;
+    try {
+      sealed = await sealInstagramSession({
+        accessToken,
+        expiresAt,
+        account: {
+          id: String(profile.user_id ?? profile.id ?? shortToken.user_id ?? ""),
+          username: profile.username,
+          accountType: profile.account_type,
+          profilePictureUrl: profile.profile_picture_url,
+          followersCount: profile.followers_count,
+          followsCount: profile.follows_count,
+        },
+      });
+    } catch (error) {
+      console.error("[Instagram OAuth] session_error", error);
+      const response = redirectWithStatus(request, "session_error");
+      response.cookies.delete(OAUTH_STATE_COOKIE);
+      return response;
+    }
 
     const response = NextResponse.redirect(new URL("/conectar?status=connected", request.url));
     response.cookies.delete(OAUTH_STATE_COOKIE);
@@ -112,12 +147,12 @@ export async function GET(request: NextRequest) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: Math.min(longToken.expires_in ?? 3600, 60 * 60 * 24 * 60),
+      maxAge: Math.min(expiresIn, 60 * 60 * 24 * 60),
     });
     return response;
   } catch (error) {
-    console.error("[Instagram OAuth] Callback falhou:", error);
-    const response = redirectWithStatus(request, "error");
+    console.error("[Instagram OAuth] internal_error", error);
+    const response = redirectWithStatus(request, "internal_error");
     response.cookies.delete(OAUTH_STATE_COOKIE);
     return response;
   }
