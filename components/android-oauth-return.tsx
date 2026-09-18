@@ -1,39 +1,60 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useState } from "react";
 
 export function AndroidOAuthReturn({ handoff }: { handoff: string }) {
-  const urls = useMemo(() => {
-    const encoded = encodeURIComponent(handoff);
+  const [message, setMessage] = useState(
+    "A autorização foi concluída. Toque no botão abaixo para voltar ao aplicativo.",
+  );
 
-    // Usamos um HTTPS App Link como destino do intent. Ele corresponde ao
-    // intent-filter do APK e é mais confiável no Chrome Android do que um
-    // esquema customizado puro.
-    const appLink =
-      `https://followclean.netlify.app/app/oauth/complete?handoff=${encoded}`;
+  const clipboardValue = `FCAUTH:${handoff}`;
+  const intentLink =
+    "intent://oauth/complete#Intent;scheme=followclean;package=br.com.followclean.app;end";
 
-    const fallback =
-      `https://followclean.netlify.app/conectar/android-retorno?handoff=${encoded}`;
+  async function copyAuthorization() {
+    try {
+      await navigator.clipboard.writeText(clipboardValue);
+      setMessage(
+        "Autorização copiada. Agora abra o FollowClean; o aplicativo concluirá o login automaticamente.",
+      );
+      return true;
+    } catch {
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = clipboardValue;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        const copied = document.execCommand("copy");
+        textarea.remove();
 
-    const intentLink =
-      `intent://followclean.netlify.app/app/oauth/complete?handoff=${encoded}` +
-      `#Intent;scheme=https;package=br.com.followclean.app;` +
-      `S.browser_fallback_url=${encodeURIComponent(fallback)};end`;
+        if (copied) {
+          setMessage(
+            "Autorização copiada. Agora abra o FollowClean; o aplicativo concluirá o login automaticamente.",
+          );
+          return true;
+        }
+      } catch {
+        // handled below
+      }
 
-    return { appLink, fallback, intentLink };
-  }, [handoff]);
-
-  function openApp() {
-    window.location.href = urls.intentLink;
+      setMessage(
+        "Não foi possível copiar automaticamente. Toque novamente em Copiar autorização e permita o acesso à área de transferência.",
+      );
+      return false;
+    }
   }
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      window.location.href = urls.intentLink;
-    }, 700);
+  async function copyAndOpenApp() {
+    const copied = await copyAuthorization();
+    if (!copied) return;
 
-    return () => window.clearTimeout(timer);
-  }, [urls.intentLink]);
+    window.setTimeout(() => {
+      window.location.href = intentLink;
+    }, 180);
+  }
 
   return (
     <main className="min-h-screen px-6 py-16">
@@ -43,31 +64,31 @@ export function AndroidOAuthReturn({ handoff }: { handoff: string }) {
         </div>
 
         <h1 className="mt-5 text-3xl font-black tracking-tight text-slate-950">
-          Voltar para o FollowClean
+          Finalizar no FollowClean
         </h1>
 
-        <p className="mt-3 text-sm leading-6 text-slate-600">
-          A autorização foi concluída. Toque em <strong>Abrir FollowClean</strong>
-          para finalizar a conexão dentro do aplicativo.
-        </p>
+        <p className="mt-3 text-sm leading-6 text-slate-600">{message}</p>
 
         <button
           type="button"
-          onClick={openApp}
+          onClick={copyAndOpenApp}
           className="mt-7 inline-flex w-full items-center justify-center rounded-xl bg-slate-950 px-5 py-3.5 text-sm font-black text-white"
         >
-          Abrir FollowClean
+          Copiar autorização e abrir FollowClean
         </button>
 
-        <a
-          href={urls.appLink}
+        <button
+          type="button"
+          onClick={() => void copyAuthorization()}
           className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-black text-slate-700"
         >
-          Tentar pelo link do aplicativo
-        </a>
+          Somente copiar autorização
+        </button>
 
-        <p className="mt-4 text-xs leading-5 text-slate-500">
-          Se o Android perguntar onde abrir o link, escolha FollowClean.
+        <p className="mt-5 text-xs leading-5 text-slate-500">
+          Se o Android não abrir o aplicativo automaticamente, abra o FollowClean
+          pela tela de aplicativos recentes. A autorização copiada será detectada
+          pelo APK.
         </p>
       </section>
     </main>
