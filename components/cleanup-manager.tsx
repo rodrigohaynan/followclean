@@ -20,6 +20,10 @@ import {
   type ProfileMetadata,
 } from "@/lib/rules/engine";
 import {
+  decodeFollowCleanBackup,
+  encodeFollowCleanBackup,
+} from "@/lib/storage/backup";
+import {
   getAnalyses,
   getCleanupSettings,
   getProfileMetadata,
@@ -1060,6 +1064,166 @@ export function CleanupManager() {
     return true;
   }
 
+  async function copyPortableBackup() {
+    if (!latest) {
+      setExtensionNote("Não há progresso para copiar.");
+      return;
+    }
+
+    const backup = encodeFollowCleanBackup({
+      latest,
+      protectedProfiles,
+      settings,
+      profileMetadata,
+      failures: extensionFailures,
+    });
+
+    try {
+      await navigator.clipboard.writeText(backup);
+      setExtensionNote(
+        "Backup de migração copiado. Guarde esse código antes de reinstalar o APK.",
+      );
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = backup;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+
+      setExtensionNote(
+        copied
+          ? "Backup de migração copiado. Guarde esse código antes de reinstalar o APK."
+          : "Não foi possível copiar automaticamente o backup.",
+      );
+    }
+  }
+
+  async function restorePortableBackup() {
+    const raw = window.prompt(
+      "Cole aqui o código de backup do FollowClean (começa com FCBACKUP1:).",
+    );
+    if (!raw) return;
+
+    try {
+      const backup = decodeFollowCleanBackup(raw);
+
+      if (backup.latest && typeof backup.latest === "object") {
+        const record = backup.latest as StoredAnalysis;
+        if (
+          typeof record.id === "string" &&
+          typeof record.createdAt === "string" &&
+          typeof record.sourceFile === "string" &&
+          record.analysis
+        ) {
+          await restoreAnalysisSnapshot(record);
+          setLatest(record);
+        }
+      }
+
+      if (Array.isArray(backup.protectedProfiles)) {
+        const restoredProtected: ProtectedProfile[] = [];
+        for (const item of backup.protectedProfiles) {
+          if (!item || typeof item !== "object") continue;
+          const row = item as Record<string, unknown>;
+          if (typeof row.username !== "string") continue;
+          const restored = await protectProfile(
+            row.username,
+            typeof row.reason === "string" ? row.reason : undefined,
+          );
+          restoredProtected.push(restored);
+        }
+        setProtectedProfiles(restoredProtected.sort((a, b) =>
+          a.username.localeCompare(b.username),
+        ));
+      }
+
+      if (backup.settings && typeof backup.settings === "object") {
+        const rawSettings = backup.settings as Record<string, unknown>;
+        const restoredSettings: CleanupSettings = {
+          notFollowingBack:
+            typeof rawSettings.notFollowingBack === "boolean"
+              ? rawSettings.notFollowingBack
+              : DEFAULT_CLEANUP_SETTINGS.notFollowingBack,
+          maxFollowers:
+            typeof rawSettings.maxFollowers === "number"
+              ? Math.max(0, Math.round(rawSettings.maxFollowers))
+              : DEFAULT_CLEANUP_SETTINGS.maxFollowers,
+        };
+        await saveCleanupSettings(restoredSettings);
+        setSettings(restoredSettings);
+      }
+
+      if (Array.isArray(backup.profileMetadata)) {
+        const restoredMetadata: ProfileMetadata[] =
+          backup.profileMetadata.flatMap((item: unknown) => {
+            if (!item || typeof item !== "object") return [];
+            const row = item as Record<string, unknown>;
+            if (
+              typeof row.username !== "string" ||
+              typeof row.followersCount !== "number"
+            ) {
+              return [];
+            }
+            return [{
+              username: row.username.toLowerCase(),
+              followersCount: row.followersCount,
+              accountType:
+                typeof row.accountType === "string" ? row.accountType : undefined,
+              dataSource:
+                row.dataSource === "android" ||
+                row.dataSource === "manual" ||
+                row.dataSource === "meta_business_discovery"
+                  ? row.dataSource
+                  : "extension",
+              updatedAt:
+                typeof row.updatedAt === "string"
+                  ? row.updatedAt
+                  : new Date().toISOString(),
+              parserVersion:
+                typeof row.parserVersion === "number"
+                  ? row.parserVersion
+                  : undefined,
+            } satisfies ProfileMetadata];
+          });
+
+        await upsertProfileMetadataBatch(restoredMetadata);
+        setProfileMetadata(restoredMetadata);
+      }
+
+      if (Array.isArray(backup.failures)) {
+        const restoredFailures: UnavailableProfile[] =
+          backup.failures.flatMap((item: unknown) => {
+            if (!item || typeof item !== "object") return [];
+            const row = item as Record<string, unknown>;
+            if (typeof row.username !== "string") return [];
+            return [{
+              username: row.username.toLowerCase(),
+              reason:
+                typeof row.reason === "string" ? row.reason : "unavailable",
+              updatedAt:
+                typeof row.updatedAt === "string"
+                  ? row.updatedAt
+                  : new Date().toISOString(),
+              source:
+                row.source === "import" || row.source === "extension"
+                  ? row.source
+                  : "android",
+            } satisfies UnavailableProfile];
+          });
+        setExtensionFailures(restoredFailures);
+      }
+
+      window.setTimeout(() => saveProgressToAppMemory(), 250);
+      setExtensionNote("Backup restaurado com sucesso neste aparelho.");
+    } catch {
+      setExtensionNote("O código informado não é um backup válido do FollowClean.");
+    }
+  }
+
   async function uploadLocalProgressToCloud() {
     if (!cloudConfigured) {
       setCloudNote("A nuvem ainda não está disponível nesta sessão.");
@@ -1409,6 +1573,23 @@ export function CleanupManager() {
                 {appCloudPending ? " · nuvem pendente" : ""}
               </p>
             ) : null}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void copyPortableBackup()}
+                disabled={!latest}
+                className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Copiar backup
+              </button>
+              <button
+                type="button"
+                onClick={() => void restorePortableBackup()}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700"
+              >
+                Restaurar backup
+              </button>
+            </div>
           </div>
           <div className={`rounded-2xl border p-4 text-sm ${cloudConfigured ? "border-blue-200 bg-blue-50 text-blue-950" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
             <div className="font-black">{cloudConfigured ? "Checkpoint em nuvem ativo" : "Checkpoint em nuvem"}</div>
