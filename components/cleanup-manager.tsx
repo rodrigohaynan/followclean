@@ -41,7 +41,7 @@ type UnavailableProfile = {
   username: string;
   reason: string;
   updatedAt: string;
-  source: "extension" | "import";
+  source: "extension" | "android" | "import";
 };
 
 type CloudSummary = {
@@ -292,6 +292,17 @@ export function CleanupManager() {
           reason?: unknown;
           updatedAt?: unknown;
         }>;
+        result?: {
+          username?: unknown;
+          followersCount?: unknown;
+          parserVersion?: unknown;
+          updatedAt?: unknown;
+        };
+        failure?: {
+          username?: unknown;
+          reason?: unknown;
+          updatedAt?: unknown;
+        };
         batch?: {
           running?: unknown;
           currentUsername?: unknown;
@@ -332,6 +343,99 @@ export function CleanupManager() {
         return;
       }
 
+      if (data.type === "PROFILE_RESULT" && fromAndroid && data.result) {
+        const item = data.result;
+        if (
+          typeof item.username === "string" &&
+          typeof item.followersCount === "number"
+        ) {
+          const record: ProfileMetadata = {
+            username: item.username.trim().toLowerCase().replace(/^@/, ""),
+            followersCount: item.followersCount,
+            dataSource: "android",
+            parserVersion:
+              typeof item.parserVersion === "number"
+                ? item.parserVersion
+                : undefined,
+            updatedAt:
+              typeof item.updatedAt === "string"
+                ? item.updatedAt
+                : new Date().toISOString(),
+          };
+
+          // Atualiza a classificação imediatamente na tela.
+          mergeMetadata([record]);
+          setExtensionFailures((current) =>
+            current.filter((failure) => failure.username !== record.username),
+          );
+          void upsertProfileMetadataBatch([record]);
+
+          if (data.batch) {
+            setBatchRunning(Boolean(data.batch.running));
+            setBatchCurrent(
+              typeof data.batch.currentUsername === "string"
+                ? data.batch.currentUsername
+                : null,
+            );
+            setBatchProcessed(
+              typeof data.batch.processedThisRun === "number"
+                ? data.batch.processedThisRun
+                : 0,
+            );
+          }
+
+          setExtensionNote(
+            `@${record.username}: ${record.followersCount?.toLocaleString("pt-BR")} seguidores · classificação atualizada.`,
+          );
+        }
+        return;
+      }
+
+      if (data.type === "PROFILE_UNAVAILABLE" && fromAndroid && data.failure) {
+        const item = data.failure;
+        if (typeof item.username === "string") {
+          const failure: UnavailableProfile = {
+            username: item.username.trim().toLowerCase().replace(/^@/, ""),
+            reason:
+              typeof item.reason === "string"
+                ? item.reason
+                : "unavailable",
+            updatedAt:
+              typeof item.updatedAt === "string"
+                ? item.updatedAt
+                : new Date().toISOString(),
+            source: "android",
+          };
+
+          setExtensionFailures((current) => {
+            const map = new Map(
+              current.map((entry) => [entry.username, entry] as const),
+            );
+            map.set(failure.username, failure);
+            return Array.from(map.values());
+          });
+
+          if (data.batch) {
+            setBatchRunning(Boolean(data.batch.running));
+            setBatchCurrent(
+              typeof data.batch.currentUsername === "string"
+                ? data.batch.currentUsername
+                : null,
+            );
+            setBatchProcessed(
+              typeof data.batch.processedThisRun === "number"
+                ? data.batch.processedThisRun
+                : 0,
+            );
+          }
+
+          setExtensionNote(
+            `@${failure.username}: não foi possível obter a contagem; movido para Indisponíveis.`,
+          );
+        }
+        return;
+      }
+
       if (data.type === "BATCH_STATUS" && data.batch) {
         setBatchRunning(Boolean(data.batch.running));
         setBatchCurrent(
@@ -368,7 +472,7 @@ export function CleanupManager() {
                 typeof item.updatedAt === "string"
                   ? item.updatedAt
                   : new Date().toISOString(),
-              source: "extension" as const,
+              source: fromAndroid ? ("android" as const) : ("extension" as const),
             }];
           });
           setExtensionFailures((current) => {
@@ -990,7 +1094,7 @@ export function CleanupManager() {
             </div>
           </div>
         </div>
-        {tab === "protected" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredProtected.map((item) => <div key={item.username} className="flex items-center justify-between gap-4 px-6 py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">Protegido neste dispositivo</p></div><button type="button" onClick={() => removeProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"><X size={14} /> Remover proteção</button></div>)}{!filteredProtected.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil protegido.</div> : null}</div> : tab === "unavailable" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredUnavailable.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-2 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">{unavailableReasonLabel(item.reason)} · Fonte: {item.source === "import" ? "arquivo do Instagram" : "verificação automática"}</p></div>{!item.username.startsWith("__deleted__") ? <a href={`https://www.instagram.com/${encodeURIComponent(item.username)}/`} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Testar perfil</a> : null}</div>)}{!filteredUnavailable.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil indisponível identificado.</div> : null}</div> : <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{activeList.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-black text-slate-900">@{item.username}</p>{typeof item.followersCount === "number" ? <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.classification === "above_limit" ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>{item.followersCount.toLocaleString("pt-BR")} seguidores</span> : <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">contagem pendente</span>}</div><p className="mt-1 text-xs text-slate-500">{item.reasons.join(" · ")} · Fonte: {sourceLabel(item.dataSource)}</p></div><div className="flex shrink-0 flex-wrap gap-2"><a href={`https://www.instagram.com/${encodeURIComponent(item.username)}/`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Abrir perfil</a>{typeof item.followersCount !== "number" ? <button type="button" onClick={() => saveManualFollowers(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Informar seguidores</button> : null}<button type="button" onClick={() => addProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700"><ShieldCheck size={14} /> Proteger</button></div></div>)}{!activeList.length ? <div className="p-8 text-center text-sm text-slate-500">{tab === "priority" ? "Nenhum perfil com contagem conhecida está dentro do limite atual." : tab === "above" ? "Nenhum perfil conhecido está acima do limite atual." : "Nenhum perfil aguardando enriquecimento."}</div> : null}</div>}
+        {tab === "protected" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredProtected.map((item) => <div key={item.username} className="flex items-center justify-between gap-4 px-6 py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">Protegido neste dispositivo</p></div><button type="button" onClick={() => removeProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"><X size={14} /> Remover proteção</button></div>)}{!filteredProtected.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil protegido.</div> : null}</div> : tab === "unavailable" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredUnavailable.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-2 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">{unavailableReasonLabel(item.reason)} · Fonte: {item.source === "import" ? "arquivo do Instagram" : item.source === "android" ? "APK Android" : "verificação automática"}</p></div>{!item.username.startsWith("__deleted__") ? <a href={`https://www.instagram.com/${encodeURIComponent(item.username)}/`} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Testar perfil</a> : null}</div>)}{!filteredUnavailable.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil indisponível identificado.</div> : null}</div> : <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{activeList.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-black text-slate-900">@{item.username}</p>{typeof item.followersCount === "number" ? <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.classification === "above_limit" ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>{item.followersCount.toLocaleString("pt-BR")} seguidores</span> : <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">contagem pendente</span>}</div><p className="mt-1 text-xs text-slate-500">{item.reasons.join(" · ")} · Fonte: {sourceLabel(item.dataSource)}</p></div><div className="flex shrink-0 flex-wrap gap-2"><a href={`https://www.instagram.com/${encodeURIComponent(item.username)}/`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Abrir perfil</a>{typeof item.followersCount !== "number" ? <button type="button" onClick={() => saveManualFollowers(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Informar seguidores</button> : null}<button type="button" onClick={() => addProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700"><ShieldCheck size={14} /> Proteger</button></div></div>)}{!activeList.length ? <div className="p-8 text-center text-sm text-slate-500">{tab === "priority" ? "Nenhum perfil com contagem conhecida está dentro do limite atual." : tab === "above" ? "Nenhum perfil conhecido está acima do limite atual." : "Nenhum perfil aguardando enriquecimento."}</div> : null}</div>}
       </section>
     </div>
   );
