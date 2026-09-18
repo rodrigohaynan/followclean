@@ -1,9 +1,13 @@
 {
   "manifest_version": 3,
   "name": "FollowClean Assist",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Enriquece a fila do FollowClean enquanto você revisa perfis no Instagram.",
-  "permissions": ["storage", "tabs"],
+  "permissions": [
+    "storage",
+    "tabs",
+    "alarms"
+  ],
   "background": {
     "service_worker": "background.js"
   },
@@ -13,13 +17,21 @@
   ],
   "content_scripts": [
     {
-      "matches": ["https://followclean.netlify.app/*"],
-      "js": ["followclean-bridge.js"],
+      "matches": [
+        "https://followclean.netlify.app/*"
+      ],
+      "js": [
+        "followclean-bridge.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://www.instagram.com/*"],
-      "js": ["instagram-profile.js"],
+      "matches": [
+        "https://www.instagram.com/*"
+      ],
+      "js": [
+        "instagram-profile.js"
+      ],
       "run_at": "document_idle"
     }
   ],
