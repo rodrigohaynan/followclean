@@ -29,6 +29,7 @@ const statusMessages: Record<string, { tone: string; text: string }> = {
   internal_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "A conexão chegou ao FollowClean, mas ocorreu uma falha interna durante o processamento." },
   android_handoff_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "A autorização do Instagram foi concluída, mas o retorno para o aplicativo expirou. Inicie a conexão novamente pelo APK." },
   android_state_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "Não foi possível validar a conexão segura do Android. Feche o navegador, volte ao APK e tente novamente." },
+  android_waiting: { tone: "border-blue-200 bg-blue-50 text-blue-900", text: "Aguardando a autorização concluída no navegador. Se você já tocou em Permitir, volte ao FollowClean novamente em alguns segundos." },
 };
 
 export default async function ConectarPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
