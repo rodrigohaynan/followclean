@@ -10,6 +10,33 @@ function redirectWithStatus(request: NextRequest, status: string) {
   );
 }
 
+function classifyTokenExchangeError(details: string) {
+  const value = details.toLowerCase();
+  if (value.includes("invalid platform app")) return "invalid_platform_app";
+  if (
+    value.includes("client_secret") ||
+    value.includes("client secret") ||
+    value.includes("invalid client") ||
+    value.includes("invalid_client")
+  ) return "client_credentials_error";
+  if (value.includes("redirect_uri") || value.includes("redirect uri")) {
+    return "redirect_uri_error";
+  }
+  if (
+    value.includes("authorization code") ||
+    value.includes("invalid code") ||
+    value.includes("code has been used") ||
+    value.includes("code expired") ||
+    value.includes("invalid_grant")
+  ) return "auth_code_error";
+  if (
+    value.includes("permission") ||
+    value.includes("not authorized") ||
+    value.includes("not authorised")
+  ) return "permission_error";
+  return "token_exchange_error";
+}
+
 export async function GET(request: NextRequest) {
   const appId = process.env.INSTAGRAM_APP_ID;
   const appSecret = process.env.INSTAGRAM_APP_SECRET;
@@ -46,7 +73,7 @@ export async function GET(request: NextRequest) {
     if (!shortTokenResponse.ok) {
       const details = await shortTokenResponse.text();
       console.error("[Instagram OAuth] token_exchange_error", shortTokenResponse.status, details);
-      const response = redirectWithStatus(request, "token_exchange_error");
+      const response = redirectWithStatus(request, classifyTokenExchangeError(details));
       response.cookies.delete(OAUTH_STATE_COOKIE);
       return response;
     }
