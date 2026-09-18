@@ -27,7 +27,7 @@ export type CleanupCandidate = {
   followersCount?: number;
   accountType?: string;
   dataSource: ProfileDataSource;
-  classification: "priority" | "review";
+  classification: "priority" | "review" | "above_limit";
 };
 
 export const DEFAULT_CLEANUP_SETTINGS: CleanupSettings = {
@@ -60,30 +60,39 @@ export function buildCleanupQueue(
         (profile.parserVersion ?? 0) >= 2;
       const followersCount = profileIsUsable ? profile?.followersCount : undefined;
 
-      if (typeof followersCount === "number" && followersCount > settings.maxFollowers) {
-        return [];
-      }
-
       const knownCount = typeof followersCount === "number";
+      const aboveLimit =
+        knownCount && followersCount > settings.maxFollowers;
+
       return [
         {
           username,
           followersCount,
           accountType: profileIsUsable ? profile?.accountType : undefined,
           dataSource: profileIsUsable ? (profile?.dataSource ?? "unknown") : "unknown",
-          classification: knownCount ? "priority" : "review",
-          reasons: knownCount
-            ? [
-                "Não segue você de volta",
-                `${followersCount.toLocaleString("pt-BR")} seguidores (até ${settings.maxFollowers.toLocaleString("pt-BR")})`,
-              ]
-            : ["Não segue você de volta", "Quantidade de seguidores ainda desconhecida"],
+          classification: !knownCount
+            ? "review"
+            : aboveLimit
+              ? "above_limit"
+              : "priority",
+          reasons: !knownCount
+            ? ["Não segue você de volta", "Quantidade de seguidores ainda desconhecida"]
+            : aboveLimit
+              ? [
+                  "Não segue você de volta",
+                  `${followersCount.toLocaleString("pt-BR")} seguidores (acima de ${settings.maxFollowers.toLocaleString("pt-BR")})`,
+                ]
+              : [
+                  "Não segue você de volta",
+                  `${followersCount.toLocaleString("pt-BR")} seguidores (até ${settings.maxFollowers.toLocaleString("pt-BR")})`,
+                ],
         },
       ];
     })
     .sort((a, b) => {
       if (a.classification !== b.classification) {
-        return a.classification === "priority" ? -1 : 1;
+        const order = { priority: 0, review: 1, above_limit: 2 } as const;
+        return order[a.classification] - order[b.classification];
       }
       if (typeof a.followersCount === "number" && typeof b.followersCount === "number") {
         return a.followersCount - b.followersCount;
