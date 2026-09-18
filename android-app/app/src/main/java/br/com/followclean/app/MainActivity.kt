@@ -126,7 +126,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.11"
+                "FollowCleanAndroid/0.3.12"
         }
 
         CookieManager.getInstance().apply {
@@ -242,6 +242,7 @@ class MainActivity : Activity() {
                 if (url.startsWith("https://followclean.netlify.app")) {
                     sendReadyToWeb()
                     sendResultsToWeb()
+                    sendAppSnapshotToWeb()
                 }
             }
         }
@@ -481,6 +482,12 @@ class MainActivity : Activity() {
             when (json.optString("type")) {
                 "PING" -> sendReadyToWeb()
                 "GET_RESULTS" -> sendResultsToWeb()
+                "SAVE_SNAPSHOT" -> {
+                    val snapshot = json.optJSONObject("snapshot")
+                    if (snapshot != null) saveAppSnapshot(snapshot)
+                }
+                "GET_SNAPSHOT" -> sendAppSnapshotToWeb()
+                "CLOUD_SYNCED" -> markCloudSynced()
                 "START_OAUTH" -> startInstagramOAuth()
                 "PAUSE_BATCH" -> pauseBatch("Pausado pelo usuário.")
                 "OPEN_PROFILE" -> openInstagramProfile(json.optString("username"))
@@ -563,6 +570,7 @@ class MainActivity : Activity() {
         if (!results.has(username)) return
         results.remove(username)
         prefs.edit().putString("results", results.toString()).apply()
+        refreshStoredSnapshotNativeData()
     }
 
     private fun startVerificationForeground(message: String) {
@@ -763,6 +771,7 @@ class MainActivity : Activity() {
                 .put("updatedAt", Instant.now().toString())
         )
         prefs.edit().putString("results", results.toString()).apply()
+        refreshStoredSnapshotNativeData()
     }
 
     private fun saveFailure(username: String, reason: String) {
@@ -775,6 +784,7 @@ class MainActivity : Activity() {
                 .put("updatedAt", Instant.now().toString())
         )
         prefs.edit().putString("failures", failures.toString()).apply()
+        refreshStoredSnapshotNativeData()
     }
 
     private fun clearFailure(username: String) {
@@ -782,6 +792,7 @@ class MainActivity : Activity() {
         if (!failures.has(username)) return
         failures.remove(username)
         prefs.edit().putString("failures", failures.toString()).apply()
+        refreshStoredSnapshotNativeData()
     }
 
     private fun readFailures(): JSONObject {
@@ -803,7 +814,88 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.11")
+                .put("version", "0.3.12")
+                .put("snapshotSavedAt", prefs.getString("app_snapshot_saved_at", null))
+                .put("cloudSyncPending", prefs.getBoolean("cloud_sync_pending", false))
+                .put("lastCloudSyncAt", prefs.getString("last_cloud_sync_at", null))
+        )
+    }
+
+    private fun saveAppSnapshot(input: JSONObject) {
+        val snapshot = JSONObject(input.toString())
+            .put("nativeResults", readResults())
+            .put("nativeFailures", readFailures())
+
+        val savedAt = Instant.now().toString()
+        snapshot.put("savedAt", savedAt)
+
+        prefs.edit()
+            .putString("app_snapshot", snapshot.toString())
+            .putString("app_snapshot_saved_at", savedAt)
+            .putBoolean("cloud_sync_pending", true)
+            .apply()
+
+        sendToWeb(
+            JSONObject()
+                .put("source", "followclean-android")
+                .put("type", "SNAPSHOT_SAVED")
+                .put("savedAt", savedAt)
+                .put("cloudSyncPending", true)
+        )
+    }
+
+    private fun refreshStoredSnapshotNativeData() {
+        val raw = prefs.getString("app_snapshot", null)
+        if (raw.isNullOrBlank()) return
+
+        val snapshot = runCatching { JSONObject(raw) }.getOrNull() ?: return
+        val savedAt = Instant.now().toString()
+
+        snapshot
+            .put("nativeResults", readResults())
+            .put("nativeFailures", readFailures())
+            .put("savedAt", savedAt)
+
+        prefs.edit()
+            .putString("app_snapshot", snapshot.toString())
+            .putString("app_snapshot_saved_at", savedAt)
+            .putBoolean("cloud_sync_pending", true)
+            .apply()
+    }
+
+    private fun sendAppSnapshotToWeb() {
+        val raw = prefs.getString("app_snapshot", null)
+        val snapshot =
+            if (raw.isNullOrBlank()) null
+            else runCatching { JSONObject(raw) }.getOrNull()
+
+        val payload = JSONObject()
+            .put("source", "followclean-android")
+            .put("type", "APP_SNAPSHOT")
+            .put("savedAt", prefs.getString("app_snapshot_saved_at", null))
+            .put("cloudSyncPending", prefs.getBoolean("cloud_sync_pending", false))
+            .put("lastCloudSyncAt", prefs.getString("last_cloud_sync_at", null))
+
+        if (snapshot != null) {
+            payload.put("snapshot", snapshot)
+        }
+
+        sendToWeb(payload)
+    }
+
+    private fun markCloudSynced() {
+        val syncedAt = Instant.now().toString()
+        prefs.edit()
+            .putBoolean("cloud_sync_pending", false)
+            .putString("last_cloud_sync_at", syncedAt)
+            .apply()
+
+        sendToWeb(
+            JSONObject()
+                .put("source", "followclean-android")
+                .put("type", "CLOUD_SYNC_STATUS")
+                .put("cloudSyncPending", false)
+                .put("lastCloudSyncAt", syncedAt)
         )
     }
 
