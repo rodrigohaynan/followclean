@@ -97,7 +97,7 @@ class MainActivity : Activity() {
             domStorageEnabled = true
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            userAgentString = "$userAgentString FollowCleanAndroid/0.1"
+            userAgentString = "$userAgentString FollowCleanAndroid/0.2.1"
         }
 
         CookieManager.getInstance().apply {
@@ -147,18 +147,7 @@ class MainActivity : Activity() {
                 view: WebView,
                 request: WebResourceRequest
             ): Boolean {
-                val uri = request.url
-                val host = uri.host.orEmpty()
-                val allowed =
-                    host == "followclean.netlify.app" ||
-                    host == "www.instagram.com" ||
-                    host == "instagram.com" ||
-                    host == "api.instagram.com"
-
-                if (allowed) return false
-
-                runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-                return true
+                return handleMainNavigation(view, request.url.toString())
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -169,6 +158,68 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    private fun handleMainNavigation(view: WebView, rawUrl: String): Boolean {
+        val uri = runCatching { Uri.parse(rawUrl) }.getOrNull() ?: return true
+        val scheme = uri.scheme.orEmpty().lowercase()
+
+        if (scheme == "intent") {
+            val fallback = runCatching {
+                Intent.parseUri(rawUrl, Intent.URI_INTENT_SCHEME)
+                    .getStringExtra("browser_fallback_url")
+            }.getOrNull()
+
+            val httpsFallback = when {
+                !fallback.isNullOrBlank() &&
+                    (fallback.startsWith("https://") || fallback.startsWith("http://")) -> fallback
+                rawUrl.startsWith("intent://") -> {
+                    val base = rawUrl.substringBefore("#Intent;")
+                    base.replaceFirst("intent://", "https://")
+                }
+                else -> null
+            }
+
+            if (!httpsFallback.isNullOrBlank()) {
+                view.loadUrl(httpsFallback)
+                updateStatus("Continuando autorização do Instagram...")
+            } else {
+                updateStatus("Não foi possível abrir a autorização do Instagram.")
+            }
+            return true
+        }
+
+        if (scheme == "instagram") {
+            val host = uri.host.orEmpty()
+            val path = uri.encodedPath.orEmpty()
+            val query = uri.encodedQuery?.let { "?$it" }.orEmpty()
+            val httpsUrl = "https://www.instagram.com/$host$path$query"
+            view.loadUrl(httpsUrl)
+            updateStatus("Abrindo autorização no navegador interno...")
+            return true
+        }
+
+        val host = uri.host.orEmpty().lowercase()
+        val allowedHost =
+            host == "followclean.netlify.app" ||
+            host == "www.instagram.com" ||
+            host == "instagram.com" ||
+            host == "api.instagram.com"
+
+        if ((scheme == "https" || scheme == "http") && allowedHost) {
+            return false
+        }
+
+        if (scheme == "about" || scheme == "data" || scheme == "blob") {
+            return false
+        }
+
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
+        }.onFailure {
+            updateStatus("Link externo não pôde ser aberto.")
+        }
+        return true
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -370,7 +421,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.1.0")
+                .put("version", "0.2.1")
         )
     }
 
