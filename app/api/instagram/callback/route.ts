@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sealInstagramSession } from "@/lib/instagram/session";
-import { verifyAndroidOAuthState } from "@/lib/instagram/oauth-state";
+import {
+  verifyAndroidBrowserOAuthState,
+  verifyAndroidOAuthState,
+} from "@/lib/instagram/oauth-state";
 import { sealAndroidHandoff } from "@/lib/instagram/android-handoff";
 import {
   consumeStoredAndroidOAuthState,
@@ -59,7 +62,8 @@ export async function GET(request: NextRequest) {
   }
 
   let isAndroidFlow = verifyAndroidOAuthState(state);
-  let stateValidatedServerSide = false;
+  const isAndroidBrowserFlow = verifyAndroidBrowserOAuthState(state);
+  let stateValidatedServerSide = isAndroidBrowserFlow;
   let androidStateRecord: { deviceKeyHash: string | null } | null = null;
 
   if (!isAndroidFlow && isStoredAndroidOAuthState(state)) {
