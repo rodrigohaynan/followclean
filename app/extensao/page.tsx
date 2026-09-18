@@ -40,9 +40,10 @@ export default function ExtensaoPage() {
             Enriquecer a fila pelo Instagram
           </h1>
           <p className="mt-3 max-w-3xl leading-7 text-slate-600">
-            A extensão acompanha somente os perfis que você abrir no Instagram,
-            captura a quantidade de seguidores exibida e devolve o resultado ao
-            FollowClean. O unfollow continua sendo uma decisão sua.
+            A extensão pode trabalhar em modo contínuo: abre os perfis pendentes
+            um por vez, captura a quantidade de seguidores exibida e salva o
+            progresso. Com a nuvem ativada, outro computador pode continuar a
+            mesma fila. O unfollow continua sendo uma decisão sua.
           </p>
         </div>
 
@@ -63,7 +64,8 @@ export default function ExtensaoPage() {
               <li><strong>2.</strong> Abra <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">chrome://extensions</code>.</li>
               <li><strong>3.</strong> Ative o <strong>Modo do desenvolvedor</strong>.</li>
               <li><strong>4.</strong> Clique em <strong>Carregar sem compactação</strong> e selecione a pasta <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">extension</code>.</li>
-              <li><strong>5.</strong> Volte à página Limpeza e envie os perfis pendentes para a extensão.</li>
+              <li><strong>5.</strong> Volte à página Limpeza e clique em <strong>Iniciar verificação contínua</strong>.</li>
+              <li><strong>6.</strong> Para deixar durante a madrugada, mantenha o Chrome e o computador ligados; a extensão salva checkpoints e retoma após reinicialização do Chrome.</li>
             </ol>
 
             <a
@@ -103,9 +105,11 @@ export default function ExtensaoPage() {
               <p className="mt-2 text-sm leading-6 text-emerald-900">
                 O FollowClean envia apenas os usuários que não seguem você de
                 volta e ainda estão sem contagem conhecida. A extensão abre um
-                perfil por vez e registra a contagem visível. Ao retornar à
-                página Limpeza, os resultados são sincronizados e os perfis com
-                até o limite configurado entram em Prioridade.
+                perfil por vez e registra a contagem visível. A execução não
+                para mais em lotes fixos de 50. Se o Instagram solicitar login,
+                checkpoint ou verificação, a extensão pausa automaticamente.
+                Com o checkpoint em nuvem ativo, a fila e o progresso ficam
+                disponíveis para continuação em outro computador.
               </p>
             </div>
           </div>
@@ -117,7 +121,7 @@ export default function ExtensaoPage() {
             <div>
               <h2 className="font-black text-slate-950">Fluxo da extensão</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Limpeza → Enviar pendentes → ícone FollowClean Assist → Abrir próximo perfil → voltar e sincronizar.
+                Limpeza → Iniciar verificação contínua → a extensão percorre a fila → checkpoints automáticos → sincronização no FollowClean.
               </p>
             </div>
           </div>
