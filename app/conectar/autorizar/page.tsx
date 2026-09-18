@@ -19,11 +19,7 @@ function buildAuthUrl(appId: string, redirectUri: string, state: string) {
 
 export default async function AutorizarInstagramPage() {
   const cookieStore = await cookies();
-  const state = (cookieStore.get(OAUTH_STATE_COOKIE)?.value ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .at(-1);
+  const state = cookieStore.get(OAUTH_STATE_COOKIE)?.value;
   const appId = process.env.INSTAGRAM_APP_ID;
   const redirectUri =
     process.env.INSTAGRAM_REDIRECT_URI ??
@@ -74,9 +70,11 @@ export default async function AutorizarInstagramPage() {
 
         <a
           href={authUrl}
+          target="_blank"
+          rel="noreferrer"
           className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3.5 font-black text-slate-700"
         >
-          <ExternalLink size={18} /> Abrir autorização nesta aba
+          <ExternalLink size={18} /> Abrir autorização no navegador
         </a>
 
         <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-blue-950">
