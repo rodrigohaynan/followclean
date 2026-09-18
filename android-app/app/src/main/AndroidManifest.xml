@@ -23,8 +23,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:scheme="followclean"
-                    android:host="oauth"
-                    android:path="/complete" />
+                    android:host="oauth" />
             </intent-filter>
         </activity>
     </application>
