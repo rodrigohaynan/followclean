@@ -143,6 +143,7 @@ async function resolveNextUsername(state) {
       return {
         mode: "cloud",
         retry: true,
+        anotherDevice: claimed.data?.error === "another_device_active",
         username: null
       };
     }
@@ -179,7 +180,16 @@ async function ensureWorkerTab(username, existingTabId) {
 }
 
 async function stopBatch(message = "Pausado") {
+  const state = await getState();
   await clearAlarms();
+
+  if (state.cloudAuth?.configured && state.cloudAuth?.token && state.deviceId) {
+    await cloudRequest("/api/cleanup/cloud/release", {
+      method: "POST",
+      body: JSON.stringify({ deviceId: state.deviceId })
+    });
+  }
+
   await saveBatch({
     running: false,
     currentUsername: null,
@@ -260,10 +270,11 @@ async function processNext() {
 
   if (next.retry) {
     await saveBatch({
-      lastMessage:
-        "Sincronização em nuvem indisponível no momento. Nova tentativa em 1 minuto."
+      lastMessage: next.anotherDevice
+        ? "Outro computador está verificando esta conta. Este dispositivo aguardará 2 minutos antes de tentar assumir a fila."
+        : "Sincronização em nuvem indisponível no momento. Nova tentativa em 1 minuto."
     });
-    await scheduleNext(60_000);
+    await scheduleNext(next.anotherDevice ? 120_000 : 60_000);
     return;
   }
 
