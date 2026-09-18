@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 type AndroidOAuthState = {
-  kind: "android";
+  kind: "android" | "android_browser";
   nonce: string;
   exp: number;
 };
@@ -22,9 +22,9 @@ function sign(payload: string) {
     .digest("base64url");
 }
 
-export function createAndroidOAuthState() {
+function createSignedState(kind: AndroidOAuthState["kind"]) {
   const payload: AndroidOAuthState = {
-    kind: "android",
+    kind,
     nonce: crypto.randomUUID().replaceAll("-", ""),
     exp: Date.now() + 10 * 60 * 1000,
   };
@@ -33,7 +33,18 @@ export function createAndroidOAuthState() {
   return `fcandroid.${encoded}.${sign(encoded)}`;
 }
 
-export function verifyAndroidOAuthState(value?: string | null) {
+export function createAndroidOAuthState() {
+  return createSignedState("android");
+}
+
+export function createAndroidBrowserOAuthState() {
+  return createSignedState("android_browser");
+}
+
+function verifySignedState(
+  value: string | null | undefined,
+  expectedKind: AndroidOAuthState["kind"],
+) {
   if (!value?.startsWith("fcandroid.")) return false;
 
   try {
@@ -55,7 +66,7 @@ export function verifyAndroidOAuthState(value?: string | null) {
     ) as AndroidOAuthState;
 
     return (
-      payload.kind === "android" &&
+      payload.kind === expectedKind &&
       typeof payload.nonce === "string" &&
       payload.nonce.length >= 16 &&
       typeof payload.exp === "number" &&
@@ -64,4 +75,12 @@ export function verifyAndroidOAuthState(value?: string | null) {
   } catch {
     return false;
   }
+}
+
+export function verifyAndroidOAuthState(value?: string | null) {
+  return verifySignedState(value, "android");
+}
+
+export function verifyAndroidBrowserOAuthState(value?: string | null) {
+  return verifySignedState(value, "android_browser");
 }
