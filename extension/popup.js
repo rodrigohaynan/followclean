@@ -2,14 +2,25 @@ async function loadState() {
   const stored = await chrome.storage.local.get([
     "followcleanQueue",
     "followcleanResults",
-    "followcleanBatch"
+    "followcleanBatch",
+    "followcleanFailures",
+    "followcleanCloudAuth"
   ]);
 
   const queue = Array.isArray(stored.followcleanQueue)
     ? stored.followcleanQueue
     : [];
   const results = stored.followcleanResults || {};
-  const pending = queue.filter((username) => !results[username]);
+  const failures = stored.followcleanFailures || {};
+  const cloudConfigured = Boolean(
+    stored.followcleanCloudAuth?.configured &&
+    stored.followcleanCloudAuth?.token
+  );
+  const pending = queue.filter((username) => {
+    const result = results[username];
+    const validResult = result && Number(result.parserVersion || 0) >= 2;
+    return !validResult && !failures[username];
+  });
   const batch = stored.followcleanBatch || {
     running: false,
     processedThisRun: 0,
@@ -34,10 +45,17 @@ async function loadState() {
       : "Em execução"
     : "Parado";
   batchMessage.textContent = batch.lastMessage || "Parado";
-  batchProgress.style.width =
-    Math.min(100, ((batch.processedThisRun || 0) / 50) * 100) + "%";
-  startBatch.disabled = batch.running || pending.length === 0;
+  batchProgress.style.width = batch.running ? "100%" : "0%";
+  startBatch.disabled =
+    batch.running || (!cloudConfigured && pending.length === 0);
   pauseBatch.disabled = !batch.running;
+
+  const cloudStatus = document.getElementById("cloudStatus");
+  if (cloudStatus) {
+    cloudStatus.textContent = cloudConfigured
+      ? "Checkpoint em nuvem ativo"
+      : "Somente neste navegador";
+  }
 
   const next = pending[0];
   const usernameEl = document.getElementById("nextUsername");
@@ -45,12 +63,16 @@ async function loadState() {
   const button = document.getElementById("openNext");
 
   if (!next) {
-    usernameEl.textContent = queue.length
-      ? "Fila concluída"
-      : "Fila vazia";
-    hintEl.textContent = queue.length
-      ? "Volte ao FollowClean e sincronize os resultados."
-      : "Envie a fila pela página Limpeza do FollowClean.";
+    usernameEl.textContent = cloudConfigured
+      ? "Fila em nuvem"
+      : queue.length
+        ? "Fila concluída"
+        : "Fila vazia";
+    hintEl.textContent = cloudConfigured
+      ? "Ao iniciar, a extensão buscará o próximo perfil pendente salvo na nuvem."
+      : queue.length
+        ? "Volte ao FollowClean e sincronize os resultados."
+        : "Envie a fila pela página Limpeza do FollowClean.";
     button.disabled = true;
     button.dataset.username = "";
     return;
