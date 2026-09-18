@@ -22,7 +22,9 @@
       "followcleanQueue",
       "followcleanQueueUpdatedAt",
       "followcleanBatch",
-      "followcleanFailures"
+      "followcleanFailures",
+      "followcleanCloudAuth",
+      "followcleanDeviceId"
     ]);
 
     const results = Object.values(stored.followcleanResults || {});
@@ -33,7 +35,14 @@
         : 0,
       queueUpdatedAt: stored.followcleanQueueUpdatedAt || null,
       batch: stored.followcleanBatch || null,
-      failures: Object.values(stored.followcleanFailures || {})
+      failures: Object.values(stored.followcleanFailures || {}),
+      cloud: stored.followcleanCloudAuth
+        ? {
+            configured: Boolean(stored.followcleanCloudAuth.configured),
+            accountUsername: stored.followcleanCloudAuth.accountUsername || null,
+            deviceId: stored.followcleanDeviceId || null
+          }
+        : null
     });
   }
 
@@ -44,6 +53,32 @@
 
     if (message.type === "PING") {
       post("READY");
+      return;
+    }
+
+    if (message.type === "SET_CLOUD_AUTH") {
+      const token =
+        typeof message.token === "string" ? message.token : "";
+      const configured = Boolean(message.configured && token);
+      const accountUsername =
+        typeof message.accountUsername === "string"
+          ? message.accountUsername
+          : null;
+
+      if (configured) {
+        await chrome.storage.local.set({
+          followcleanCloudAuth: {
+            configured: true,
+            token,
+            accountUsername,
+            updatedAt: new Date().toISOString()
+          }
+        });
+      } else {
+        await chrome.storage.local.remove(["followcleanCloudAuth"]);
+      }
+
+      post("CLOUD_AUTH_SAVED", { configured, accountUsername });
       return;
     }
 
@@ -120,7 +155,8 @@
       changes.followcleanResults ||
       changes.followcleanBatch ||
       changes.followcleanQueue ||
-      changes.followcleanFailures
+      changes.followcleanFailures ||
+      changes.followcleanCloudAuth
     ) {
       void sendResults();
     }
