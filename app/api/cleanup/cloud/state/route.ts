@@ -42,6 +42,22 @@ export async function GET(request: NextRequest) {
     [identity.ownerId],
   );
 
+  const snapshotRows = await sql.query(
+    `
+      SELECT
+        analysis,
+        source_file,
+        analysis_created_at,
+        protected_profiles,
+        settings,
+        updated_at
+      FROM followclean_cleanup_snapshot
+      WHERE owner_id = $1
+      LIMIT 1
+    `,
+    [identity.ownerId],
+  );
+
   const devices = await sql.query(
     `
       SELECT device_id, last_username, last_seen_at
@@ -58,6 +74,7 @@ export async function GET(request: NextRequest) {
     account: identity,
     summary,
     rows,
+    snapshot: snapshotRows[0] ?? null,
     devices,
   });
 }
