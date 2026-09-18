@@ -12,7 +12,7 @@ export default function DashboardPage() {
         </Link>
         <div className="flex items-center gap-2">
           <Link href="/conectar" className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm md:inline-flex"><Camera size={16} /> Instagram</Link>
-          <Link href="/limpeza" className="hidden items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm sm:inline-flex"><ShieldCheck size={16} /> Limpeza</Link>
+          <Link href="/limpeza" className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm"><ShieldCheck size={16} /> Limpeza</Link>
           <Link href="/" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm"><ArrowLeft size={16} /> Início</Link>
         </div>
       </header>
