@@ -44,6 +44,14 @@ type UnavailableProfile = {
   source: "extension" | "import";
 };
 
+type CloudSummary = {
+  total: number;
+  pending: number;
+  processing: number;
+  verified: number;
+  unavailable: number;
+};
+
 function sourceLabel(source: ProfileMetadata["dataSource"]) {
   if (source === "meta_business_discovery") return "Meta";
   if (source === "extension") return "Extensão";
@@ -88,6 +96,10 @@ export function CleanupManager() {
   const [batchCurrent, setBatchCurrent] = useState<string | null>(null);
   const [batchProcessed, setBatchProcessed] = useState(0);
   const [extensionFailures, setExtensionFailures] = useState<UnavailableProfile[]>([]);
+  const [cloudConfigured, setCloudConfigured] = useState(false);
+  const [cloudToken, setCloudToken] = useState<string | null>(null);
+  const [cloudNote, setCloudNote] = useState("Nuvem ainda não configurada.");
+  const [cloudSummary, setCloudSummary] = useState<CloudSummary | null>(null);
 
   useEffect(() => {
     Promise.all([getAnalyses(), getProtectedProfiles(), getCleanupSettings(), getProfileMetadata()])
@@ -158,6 +170,15 @@ export function CleanupManager() {
         return;
       }
 
+      if (data.type === "CLOUD_AUTH_SAVED") {
+        setCloudNote(
+          cloudConfigured
+            ? "Checkpoint em nuvem vinculado à extensão."
+            : "Extensão pronta para uso local."
+        );
+        return;
+      }
+
       if (data.type === "BATCH_STATUS" && data.batch) {
         setBatchRunning(Boolean(data.batch.running));
         setBatchCurrent(
@@ -197,7 +218,11 @@ export function CleanupManager() {
               source: "extension" as const,
             }];
           });
-          setExtensionFailures(failures);
+          setExtensionFailures((current) => {
+            const map = new Map(current.map((item) => [item.username, item] as const));
+            for (const item of failures) map.set(item.username, item);
+            return Array.from(map.values());
+          });
         }
 
         if (data.batch) {
@@ -269,6 +294,150 @@ export function CleanupManager() {
     }
 
     return () => window.removeEventListener("message", handleMessage);
+  }, [cloudConfigured]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function setupCloudSync() {
+      try {
+        const tokenResponse = await fetch("/api/cleanup/cloud/token", {
+          cache: "no-store",
+        });
+
+        if (!tokenResponse.ok) {
+          if (!cancelled) {
+            setCloudConfigured(false);
+            setCloudNote("Conecte o Instagram para ativar a continuidade entre dispositivos.");
+          }
+          return;
+        }
+
+        const tokenData = await tokenResponse.json();
+        const configured = Boolean(tokenData?.configured);
+        const token = typeof tokenData?.token === "string" ? tokenData.token : null;
+        const accountUsername =
+          typeof tokenData?.account?.username === "string"
+            ? tokenData.account.username
+            : null;
+
+        if (cancelled) return;
+
+        setCloudConfigured(configured);
+        setCloudToken(token);
+        setCloudNote(
+          configured
+            ? "Checkpoint em nuvem ativo. O progresso pode continuar em outro computador."
+            : "Código de nuvem pronto; falta conectar o banco Neon.",
+        );
+
+        window.postMessage(
+          {
+            source: "followclean-web",
+            type: "SET_CLOUD_AUTH",
+            configured,
+            token,
+            accountUsername,
+          },
+          "*",
+        );
+
+        if (!configured) return;
+
+        const stateResponse = await fetch("/api/cleanup/cloud/state", {
+          cache: "no-store",
+        });
+        if (!stateResponse.ok) return;
+
+        const state = await stateResponse.json();
+        if (cancelled) return;
+
+        if (state?.summary) {
+          setCloudSummary({
+            total: Number(state.summary.total || 0),
+            pending: Number(state.summary.pending || 0),
+            processing: Number(state.summary.processing || 0),
+            verified: Number(state.summary.verified || 0),
+            unavailable: Number(state.summary.unavailable || 0),
+          });
+        }
+
+        const verifiedRecords: ProfileMetadata[] = Array.isArray(state?.rows)
+          ? state.rows.flatMap((item: Record<string, unknown>) => {
+              if (
+                item.status !== "verified" ||
+                typeof item.username !== "string"
+              ) {
+                return [];
+              }
+
+              const followersCount = Number(item.followers_count);
+              if (!Number.isFinite(followersCount)) return [];
+
+              return [{
+                username: item.username.toLowerCase(),
+                followersCount,
+                parserVersion: Number(item.parser_version || 2),
+                dataSource: "extension" as const,
+                updatedAt:
+                  typeof item.updated_at === "string"
+                    ? item.updated_at
+                    : new Date().toISOString(),
+              }];
+            })
+          : [];
+
+        if (verifiedRecords.length) {
+          await upsertProfileMetadataBatch(verifiedRecords);
+          setProfileMetadata((current) => {
+            const map = new Map(current.map((item) => [item.username, item] as const));
+            for (const item of verifiedRecords) map.set(item.username, item);
+            return Array.from(map.values());
+          });
+        }
+
+        const cloudFailures: UnavailableProfile[] = Array.isArray(state?.rows)
+          ? state.rows.flatMap((item: Record<string, unknown>) => {
+              if (
+                item.status !== "unavailable" ||
+                typeof item.username !== "string"
+              ) {
+                return [];
+              }
+
+              return [{
+                username: item.username.toLowerCase(),
+                reason:
+                  typeof item.failure_reason === "string"
+                    ? item.failure_reason
+                    : "unavailable",
+                updatedAt:
+                  typeof item.updated_at === "string"
+                    ? item.updated_at
+                    : new Date().toISOString(),
+                source: "extension" as const,
+              }];
+            })
+          : [];
+
+        if (cloudFailures.length) {
+          setExtensionFailures((current) => {
+            const map = new Map(current.map((item) => [item.username, item] as const));
+            for (const item of cloudFailures) map.set(item.username, item);
+            return Array.from(map.values());
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setCloudNote("Não foi possível sincronizar a nuvem agora. O modo local continua disponível.");
+        }
+      }
+    }
+
+    void setupCloudSync();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const protectedSet = useMemo(() => new Set(protectedProfiles.map((item) => item.username)), [protectedProfiles]);
@@ -380,6 +549,83 @@ export function CleanupManager() {
     }).FollowCleanAndroid;
   }
 
+  async function syncCloudState() {
+    if (!cloudConfigured) return;
+
+    try {
+      const response = await fetch("/api/cleanup/cloud/state", {
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const state = await response.json();
+
+      if (state?.summary) {
+        setCloudSummary({
+          total: Number(state.summary.total || 0),
+          pending: Number(state.summary.pending || 0),
+          processing: Number(state.summary.processing || 0),
+          verified: Number(state.summary.verified || 0),
+          unavailable: Number(state.summary.unavailable || 0),
+        });
+      }
+
+      const records: ProfileMetadata[] = Array.isArray(state?.rows)
+        ? state.rows.flatMap((item: Record<string, unknown>) => {
+            if (item.status !== "verified" || typeof item.username !== "string") return [];
+            const followersCount = Number(item.followers_count);
+            if (!Number.isFinite(followersCount)) return [];
+            return [{
+              username: item.username.toLowerCase(),
+              followersCount,
+              parserVersion: Number(item.parser_version || 2),
+              dataSource: "extension" as const,
+              updatedAt:
+                typeof item.updated_at === "string"
+                  ? item.updated_at
+                  : new Date().toISOString(),
+            }];
+          })
+        : [];
+
+      if (records.length) {
+        await upsertProfileMetadataBatch(records);
+        setProfileMetadata((current) => {
+          const map = new Map(current.map((item) => [item.username, item] as const));
+          for (const item of records) map.set(item.username, item);
+          return Array.from(map.values());
+        });
+      }
+
+      const failures: UnavailableProfile[] = Array.isArray(state?.rows)
+        ? state.rows.flatMap((item: Record<string, unknown>) => {
+            if (item.status !== "unavailable" || typeof item.username !== "string") return [];
+            return [{
+              username: item.username.toLowerCase(),
+              reason:
+                typeof item.failure_reason === "string"
+                  ? item.failure_reason
+                  : "unavailable",
+              updatedAt:
+                typeof item.updated_at === "string"
+                  ? item.updated_at
+                  : new Date().toISOString(),
+              source: "extension" as const,
+            }];
+          })
+        : [];
+
+      if (failures.length) {
+        setExtensionFailures((current) => {
+          const map = new Map(current.map((item) => [item.username, item] as const));
+          for (const item of failures) map.set(item.username, item);
+          return Array.from(map.values());
+        });
+      }
+    } catch {
+      setCloudNote("Falha temporária ao buscar o checkpoint em nuvem.");
+    }
+  }
+
   function sendQueueToExtension() {
     window.postMessage(
       {
@@ -391,8 +637,48 @@ export function CleanupManager() {
     );
   }
 
-  function startAutomaticVerification() {
+  async function startAutomaticVerification() {
     const usernames = review.map((item) => item.username);
+
+    if (!androidReady && cloudConfigured) {
+      try {
+        const response = await fetch("/api/cleanup/cloud/queue", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ usernames }),
+        });
+
+        if (!response.ok) {
+          setExtensionNote("Não foi possível preparar a fila em nuvem. Tente sincronizar novamente.");
+          return;
+        }
+
+        const payload = await response.json();
+        if (payload?.summary) {
+          setCloudSummary({
+            total: Number(payload.summary.total || 0),
+            pending: Number(payload.summary.pending || 0),
+            processing: Number(payload.summary.processing || 0),
+            verified: Number(payload.summary.verified || 0),
+            unavailable: Number(payload.summary.unavailable || 0),
+          });
+        }
+
+        window.postMessage(
+          {
+            source: "followclean-web",
+            type: "SET_CLOUD_AUTH",
+            configured: true,
+            token: cloudToken,
+          },
+          "*",
+        );
+      } catch {
+        setExtensionNote("Falha ao preparar o checkpoint em nuvem.");
+        return;
+      }
+    }
+
     if (androidReady && androidBridge()?.postMessage) {
       androidBridge()?.postMessage(
         JSON.stringify({ type: "START_BATCH", usernames }),
@@ -407,7 +693,11 @@ export function CleanupManager() {
         "*",
       );
     }
-    setExtensionNote("Iniciando verificação automática...");
+    setExtensionNote(
+      cloudConfigured
+        ? "Iniciando verificação contínua com checkpoint em nuvem..."
+        : "Iniciando verificação contínua neste navegador...",
+    );
   }
 
   function pauseAutomaticVerification() {
@@ -422,6 +712,7 @@ export function CleanupManager() {
   }
 
   function syncExtensionResults() {
+    if (cloudConfigured) void syncCloudState();
     if (androidReady && androidBridge()?.postMessage) {
       androidBridge()?.postMessage(JSON.stringify({ type: "GET_RESULTS" }));
     } else {
@@ -492,13 +783,13 @@ export function CleanupManager() {
           </div>
         </div>
         <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950 sm:flex-row sm:items-center sm:justify-between"><span>A regra já entende a contagem de seguidores. A conexão oficial da Meta valida sua conta; a extensão assistida enriquece os perfis da fila.</span><Link href="/conectar" className="inline-flex shrink-0 items-center gap-2 font-black text-blue-700"><Instagram size={16} /> Instagram conectado</Link></div>
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
           <div className={`rounded-2xl border p-4 text-sm ${extensionReady || androidReady ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
             <div className="font-black">{androidReady ? "FollowClean Android · scanner nativo" : "FollowClean Assist · navegador"}</div>
             <p className="mt-1 leading-6">{extensionNote}</p>
-            {batchRunning ? <p className="mt-1 text-xs font-black text-emerald-800">Lote em execução · {batchProcessed}/50 {batchCurrent ? `· @${batchCurrent}` : ""}</p> : null}
+            {batchRunning ? <p className="mt-1 text-xs font-black text-emerald-800">Execução contínua · {batchProcessed.toLocaleString("pt-BR")} perfis nesta sessão {batchCurrent ? `· @${batchCurrent}` : ""}</p> : null}
             <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" disabled={(!extensionReady && !androidReady) || review.length === 0 || batchRunning} onClick={startAutomaticVerification} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Verificar automaticamente</button>
+              <button type="button" disabled={(!extensionReady && !androidReady) || review.length === 0 || batchRunning} onClick={startAutomaticVerification} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Iniciar verificação contínua</button>
               <button type="button" disabled={(!extensionReady && !androidReady) || !batchRunning} onClick={pauseAutomaticVerification} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800 disabled:cursor-not-allowed disabled:opacity-40">Pausar</button>
               {!androidReady ? <button type="button" disabled={!extensionReady || review.length === 0} onClick={sendQueueToExtension} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Só enviar fila</button> : null}
               <button type="button" disabled={!extensionReady && !androidReady} onClick={syncExtensionResults} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Sincronizar</button>
@@ -508,6 +799,11 @@ export function CleanupManager() {
           <div className={`rounded-2xl border p-4 text-sm ${androidReady ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-amber-200 bg-amber-50 text-amber-950"}`}>
             <div className="font-black">{androidReady ? "APK ativo" : "Modo celular no navegador"}</div>
             <p className="mt-1 leading-6">{androidReady ? "O APK pode visitar os perfis da fila em uma WebView isolada, ler a contagem pública e devolver os resultados automaticamente ao FollowClean." : "No Chrome Android comum, a automação não pode ler outras páginas. Use o APK do FollowClean ou informe a contagem manualmente."}</p>
+          </div>
+          <div className={`rounded-2xl border p-4 text-sm ${cloudConfigured ? "border-blue-200 bg-blue-50 text-blue-950" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+            <div className="font-black">{cloudConfigured ? "Checkpoint em nuvem ativo" : "Checkpoint em nuvem"}</div>
+            <p className="mt-1 leading-6">{cloudNote}</p>
+            {cloudSummary ? <p className="mt-2 text-xs font-black">Pendentes: {cloudSummary.pending.toLocaleString("pt-BR")} · Verificados: {cloudSummary.verified.toLocaleString("pt-BR")} · Indisponíveis: {cloudSummary.unavailable.toLocaleString("pt-BR")}</p> : null}
           </div>
         </div>
       </section>
