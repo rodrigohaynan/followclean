@@ -15,9 +15,9 @@ export function isStoredAndroidOAuthState(value?: string | null) {
   return Boolean(value?.startsWith(PREFIX));
 }
 
-export async function createStoredAndroidOAuthState(deviceKey: string) {
-  const normalizedDeviceKey = deviceKey.trim();
-  if (normalizedDeviceKey.length < 16 || normalizedDeviceKey.length > 200) {
+export async function createStoredAndroidOAuthState(deviceKey?: string | null) {
+  const normalizedDeviceKey = deviceKey?.trim() ?? "";
+  if (normalizedDeviceKey && (normalizedDeviceKey.length < 16 || normalizedDeviceKey.length > 200)) {
     throw new Error("device_key_invalid");
   }
 
@@ -25,7 +25,9 @@ export async function createStoredAndroidOAuthState(deviceKey: string) {
   const sql = getCloudSql();
   const state = PREFIX + randomBytes(32).toString("base64url");
   const stateHash = hashValue(state);
-  const deviceKeyHash = hashAndroidDeviceKey(normalizedDeviceKey);
+  const deviceKeyHash = normalizedDeviceKey
+    ? hashAndroidDeviceKey(normalizedDeviceKey)
+    : null;
 
   await sql`
     DELETE FROM followclean_android_oauth_states
@@ -55,8 +57,13 @@ export async function consumeStoredAndroidOAuthState(value: string) {
     RETURNING device_key_hash
   `;
 
+  if (!rows.length) return null;
+
   const deviceKeyHash = rows[0]?.device_key_hash;
-  return typeof deviceKeyHash === "string" && deviceKeyHash
-    ? { deviceKeyHash }
-    : null;
+  return {
+    deviceKeyHash:
+      typeof deviceKeyHash === "string" && deviceKeyHash
+        ? deviceKeyHash
+        : null,
+  };
 }
