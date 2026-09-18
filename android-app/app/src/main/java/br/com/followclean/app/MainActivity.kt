@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.ClipboardManager
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -44,7 +45,7 @@ class MainActivity : Activity() {
 
     private val betweenProfilesMs = 12_000L
     private val extractionDelayMs = 2_500L
-    private val maxExtractionAttempts = 5
+    private val maxExtractionAttempts = 7
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -125,7 +126,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.8"
+                "FollowCleanAndroid/0.3.9"
         }
 
         CookieManager.getInstance().apply {
@@ -443,7 +444,10 @@ class MainActivity : Activity() {
             loadsImagesAutomatically = false
             blockNetworkImage = true
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            userAgentString = "$userAgentString FollowCleanScanner/0.1"
+            userAgentString =
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
+                "FollowCleanScanner/0.2"
         }
 
         CookieManager.getInstance().setAcceptThirdPartyCookies(scannerWebView, true)
@@ -466,7 +470,6 @@ class MainActivity : Activity() {
                     return
                 }
 
-                extractionAttempts = 0
                 handler.postDelayed({ extractFollowers() }, extractionDelayMs)
             }
         }
@@ -480,6 +483,8 @@ class MainActivity : Activity() {
                 "GET_RESULTS" -> sendResultsToWeb()
                 "START_OAUTH" -> startInstagramOAuth()
                 "PAUSE_BATCH" -> pauseBatch("Pausado pelo usuário.")
+                "OPEN_PROFILE" -> openInstagramProfile(json.optString("username"))
+                "REVIEW_PROFILE" -> reviewProfile(json.optString("username"))
                 "START_BATCH" -> {
                     val usernames = json.optJSONArray("usernames") ?: JSONArray()
                     startBatch(jsonArrayToUsernames(usernames))
@@ -488,6 +493,99 @@ class MainActivity : Activity() {
         }.onFailure {
             updateStatus("Comando inválido recebido do FollowClean.")
         }
+    }
+
+    private fun openInstagramProfile(rawUsername: String) {
+        val username = rawUsername.trim().lowercase().removePrefix("@")
+        if (username.isBlank()) return
+
+        val instagramIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("instagram://user?username=${Uri.encode(username)}")
+        ).apply {
+            setPackage("com.instagram.android")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        val openedInstagram = runCatching {
+            startActivity(instagramIntent)
+            true
+        }.getOrDefault(false)
+
+        if (!openedInstagram) {
+            val webIntent = Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("https://www.instagram.com/${Uri.encode(username)}/")
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            runCatching {
+                startActivity(webIntent)
+            }.onFailure {
+                updateStatus("Não foi possível abrir @$username.")
+            }
+        }
+    }
+
+    private fun reviewProfile(rawUsername: String) {
+        val username = rawUsername.trim().lowercase().removePrefix("@")
+        if (username.isBlank()) return
+
+        clearFailure(username)
+        clearResult(username)
+
+        if (running) {
+            val mutable = queue.toMutableList()
+            mutable.removeAll { it == username }
+
+            val insertAt =
+                if (currentUsername != null) {
+                    (currentIndex + 1).coerceAtMost(mutable.size)
+                } else {
+                    currentIndex.coerceAtMost(mutable.size)
+                }
+
+            mutable.add(insertAt, username)
+            queue = mutable.distinct()
+            persistState()
+
+            val message = "@$username marcado para revisão na fila."
+            updateStatus(message)
+            sendBatchStatus(message)
+        } else {
+            startBatch(listOf(username))
+        }
+    }
+
+    private fun clearResult(username: String) {
+        val results = readResults()
+        if (!results.has(username)) return
+        results.remove(username)
+        prefs.edit().putString("results", results.toString()).apply()
+    }
+
+    private fun startVerificationForeground(message: String) {
+        val intent = Intent(this, VerificationForegroundService::class.java)
+            .setAction(VerificationForegroundService.ACTION_START)
+            .putExtra(VerificationForegroundService.EXTRA_MESSAGE, message)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    private fun updateVerificationForeground(message: String) {
+        val intent = Intent(this, VerificationForegroundService::class.java)
+            .setAction(VerificationForegroundService.ACTION_UPDATE)
+            .putExtra(VerificationForegroundService.EXTRA_MESSAGE, message)
+        startService(intent)
+    }
+
+    private fun stopVerificationForeground() {
+        stopService(Intent(this, VerificationForegroundService::class.java))
     }
 
     private fun startInstagramOAuth() {
@@ -513,6 +611,7 @@ class MainActivity : Activity() {
         running = true
         currentUsername = null
         persistState()
+        startVerificationForeground("Preparando ${queue.size} perfis para verificação")
         sendBatchStatus("Verificação contínua iniciada. ${queue.size} perfis na fila.")
         processNext()
     }
@@ -522,6 +621,7 @@ class MainActivity : Activity() {
         currentUsername = null
         handler.removeCallbacksAndMessages(null)
         persistState()
+        stopVerificationForeground()
         updateStatus(message)
         sendBatchStatus(message)
         sendResultsToWeb()
@@ -544,8 +644,10 @@ class MainActivity : Activity() {
         val username = currentUsername ?: return
         persistState()
 
+        extractionAttempts = 0
         val message = "Verificando @$username · ${processedThisRun + 1}/${queue.size}"
         updateStatus(message)
+        updateVerificationForeground(message)
         sendBatchStatus(message)
 
         scannerWebView.loadUrl("https://www.instagram.com/${Uri.encode(username)}/")
@@ -624,25 +726,32 @@ class MainActivity : Activity() {
     private fun retryOrSkip(username: String) {
         extractionAttempts++
         if (extractionAttempts < maxExtractionAttempts) {
-            val delay = 2_500L + (extractionAttempts * 2_000L)
             val message =
                 "Aguardando @$username carregar · tentativa ${extractionAttempts + 1}/$maxExtractionAttempts"
             updateStatus(message)
+            updateVerificationForeground(message)
             sendBatchStatus(message)
+
+            if (extractionAttempts == 3) {
+                scannerWebView.reload()
+                return
+            }
+
+            val delay = 2_500L + (extractionAttempts * 2_000L)
             handler.postDelayed({ extractFollowers() }, delay)
             return
         }
 
-        saveFailure(username, "unreadable")
+        clearFailure(username)
         processedThisRun++
         currentIndex++
         currentUsername = null
         persistState()
 
         val message =
-            "Não foi possível ler @$username após $maxExtractionAttempts tentativas. Movido para Indisponíveis."
+            "Não foi possível confirmar @$username após $maxExtractionAttempts tentativas. Mantido em Revisar."
         updateStatus(message)
-        sendUnavailableToWeb(username, "unreadable")
+        sendReviewNeededToWeb(username, "unreadable")
         sendResultsToWeb()
         sendBatchStatus(message)
         handler.postDelayed({ processNext() }, betweenProfilesMs)
@@ -699,7 +808,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.8")
+                .put("version", "0.3.9")
         )
     }
 
@@ -714,6 +823,22 @@ class MainActivity : Activity() {
                         .put("username", username)
                         .put("followersCount", followersCount)
                         .put("dataSource", "android")
+                        .put("updatedAt", Instant.now().toString())
+                )
+                .put("batch", batchJson())
+        )
+    }
+
+    private fun sendReviewNeededToWeb(username: String, reason: String) {
+        sendToWeb(
+            JSONObject()
+                .put("source", "followclean-android")
+                .put("type", "PROFILE_REVIEW")
+                .put(
+                    "review",
+                    JSONObject()
+                        .put("username", username)
+                        .put("reason", reason)
                         .put("updatedAt", Instant.now().toString())
                 )
                 .put("batch", batchJson())
