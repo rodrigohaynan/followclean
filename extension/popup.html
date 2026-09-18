@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>FollowClean Assist</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <div class="brand">
+        <div class="brand-mark">FC</div>
+        <div>
+          <strong>FollowClean Assist</strong>
+          <span>Revisão assistida</span>
+        </div>
+      </div>
+
+      <section class="stats">
+        <div><strong id="queueTotal">0</strong><span>na fila</span></div>
+        <div><strong id="capturedTotal">0</strong><span>capturados</span></div>
+        <div><strong id="pendingTotal">0</strong><span>pendentes</span></div>
+      </section>
+
+      <section class="next-card">
+        <span class="eyebrow">Próximo perfil</span>
+        <strong id="nextUsername">Fila vazia</strong>
+        <p id="nextHint">Envie a fila pela página Limpeza do FollowClean.</p>
+      </section>
+
+      <button id="openNext" class="primary" disabled>Abrir próximo perfil</button>
+      <button id="openFollowClean" class="secondary">Abrir FollowClean</button>
+
+      <p class="footnote">
+        A extensão captura somente a contagem exibida no perfil que você abrir.
+        Ela não executa unfollow automático.
+      </p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
