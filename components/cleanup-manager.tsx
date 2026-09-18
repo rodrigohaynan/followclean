@@ -25,6 +25,7 @@ import {
   getProfileMetadata,
   getProtectedProfiles,
   protectProfile,
+  deleteProfileMetadata,
   saveCleanupSettings,
   unprotectProfile,
   upsertProfileMetadataBatch,
@@ -101,6 +102,7 @@ export function CleanupManager() {
   const [cloudNote, setCloudNote] = useState("Nuvem ainda não configurada.");
   const [cloudSummary, setCloudSummary] = useState<CloudSummary | null>(null);
   const [cloudHydrated, setCloudHydrated] = useState(false);
+  const [reviewFlags, setReviewFlags] = useState<Record<string, string>>({});
 
   async function applyCloudState(state: Record<string, unknown>) {
     const summary = state?.summary as Record<string, unknown> | undefined;
@@ -303,6 +305,11 @@ export function CleanupManager() {
           reason?: unknown;
           updatedAt?: unknown;
         };
+        review?: {
+          username?: unknown;
+          reason?: unknown;
+          updatedAt?: unknown;
+        };
         batch?: {
           running?: unknown;
           currentUsername?: unknown;
@@ -365,6 +372,11 @@ export function CleanupManager() {
 
           // Atualiza a classificação imediatamente na tela.
           mergeMetadata([record]);
+          setReviewFlags((current) => {
+            const next = { ...current };
+            delete next[record.username];
+            return next;
+          });
           setExtensionFailures((current) =>
             current.filter((failure) => failure.username !== record.username),
           );
@@ -431,6 +443,24 @@ export function CleanupManager() {
 
           setExtensionNote(
             `@${failure.username}: não foi possível obter a contagem; movido para Indisponíveis.`,
+          );
+        }
+        return;
+      }
+
+      if (data.type === "PROFILE_REVIEW" && fromAndroid && data.review) {
+        const item = data.review;
+        if (typeof item.username === "string") {
+          const username = item.username.trim().toLowerCase().replace(/^@/, "");
+          const reason =
+            typeof item.reason === "string" ? item.reason : "unreadable";
+
+          setExtensionFailures((current) =>
+            current.filter((failure) => failure.username !== username),
+          );
+          setReviewFlags((current) => ({ ...current, [username]: reason }));
+          setExtensionNote(
+            `@${username}: leitura inconclusiva; mantido em Revisar.`,
           );
         }
         return;
@@ -832,6 +862,73 @@ export function CleanupManager() {
     }
   }
 
+  function openProfile(username: string) {
+    const normalized = username.trim().toLowerCase().replace(/^@/, "");
+    if (!normalized) return;
+
+    if (androidReady && androidBridge()?.postMessage) {
+      androidBridge()?.postMessage(
+        JSON.stringify({ type: "OPEN_PROFILE", username: normalized }),
+      );
+      return;
+    }
+
+    window.open(
+      `https://www.instagram.com/${encodeURIComponent(normalized)}/`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
+
+  async function reviewProfile(username: string) {
+    const normalized = username.trim().toLowerCase().replace(/^@/, "");
+    if (!normalized) return;
+
+    setExtensionFailures((current) =>
+      current.filter((failure) => failure.username !== normalized),
+    );
+    setProfileMetadata((current) =>
+      current.filter((item) => item.username !== normalized),
+    );
+    setReviewFlags((current) => ({
+      ...current,
+      [normalized]: "manual_review",
+    }));
+
+    await deleteProfileMetadata(normalized);
+
+    if (cloudConfigured) {
+      void fetch("/api/cleanup/cloud/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: normalized }),
+      });
+    }
+
+    if (androidReady && androidBridge()?.postMessage) {
+      androidBridge()?.postMessage(
+        JSON.stringify({ type: "REVIEW_PROFILE", username: normalized }),
+      );
+      setExtensionNote(`@${normalized} enviado para nova verificação no APK.`);
+    } else if (extensionReady) {
+      window.postMessage(
+        {
+          source: "followclean-web",
+          type: "SET_QUEUE_AND_START",
+          usernames: [normalized],
+        },
+        "*",
+      );
+      setExtensionNote(`@${normalized} enviado para nova verificação na extensão.`);
+    } else {
+      setExtensionNote(
+        `@${normalized} voltou para Revisar. Inicie a verificação quando houver integração disponível.`,
+      );
+    }
+
+    setTab("review");
+  }
+
   function sendQueueToExtension() {
     window.postMessage(
       {
@@ -1094,7 +1191,7 @@ export function CleanupManager() {
             </div>
           </div>
         </div>
-        {tab === "protected" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredProtected.map((item) => <div key={item.username} className="flex items-center justify-between gap-4 px-6 py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">Protegido neste dispositivo</p></div><button type="button" onClick={() => removeProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"><X size={14} /> Remover proteção</button></div>)}{!filteredProtected.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil protegido.</div> : null}</div> : tab === "unavailable" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredUnavailable.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-2 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">{unavailableReasonLabel(item.reason)} · Fonte: {item.source === "import" ? "arquivo do Instagram" : item.source === "android" ? "APK Android" : "verificação automática"}</p></div>{!item.username.startsWith("__deleted__") ? <a href={`https://www.instagram.com/${encodeURIComponent(item.username)}/`} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Testar perfil</a> : null}</div>)}{!filteredUnavailable.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil indisponível identificado.</div> : null}</div> : <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{activeList.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-black text-slate-900">@{item.username}</p>{typeof item.followersCount === "number" ? <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.classification === "above_limit" ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>{item.followersCount.toLocaleString("pt-BR")} seguidores</span> : <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">contagem pendente</span>}</div><p className="mt-1 text-xs text-slate-500">{item.reasons.join(" · ")} · Fonte: {sourceLabel(item.dataSource)}</p></div><div className="flex shrink-0 flex-wrap gap-2"><a href={`https://www.instagram.com/${encodeURIComponent(item.username)}/`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Abrir perfil</a>{typeof item.followersCount !== "number" ? <button type="button" onClick={() => saveManualFollowers(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Informar seguidores</button> : null}<button type="button" onClick={() => addProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700"><ShieldCheck size={14} /> Proteger</button></div></div>)}{!activeList.length ? <div className="p-8 text-center text-sm text-slate-500">{tab === "priority" ? "Nenhum perfil com contagem conhecida está dentro do limite atual." : tab === "above" ? "Nenhum perfil conhecido está acima do limite atual." : "Nenhum perfil aguardando enriquecimento."}</div> : null}</div>}
+        {tab === "protected" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredProtected.map((item) => <div key={item.username} className="flex items-center justify-between gap-4 px-6 py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">Protegido neste dispositivo</p></div><button type="button" onClick={() => removeProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"><X size={14} /> Remover proteção</button></div>)}{!filteredProtected.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil protegido.</div> : null}</div> : tab === "unavailable" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredUnavailable.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-2 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">{unavailableReasonLabel(item.reason)} · Fonte: {item.source === "import" ? "arquivo do Instagram" : item.source === "android" ? "APK Android" : "verificação automática"}</p></div>{!item.username.startsWith("__deleted__") ? <div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => openProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Testar perfil</button><button type="button" onClick={() => void reviewProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Revisar novamente</button></div> : null}</div>)}{!filteredUnavailable.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil indisponível identificado.</div> : null}</div> : <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{activeList.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-black text-slate-900">@{item.username}</p>{typeof item.followersCount === "number" ? <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.classification === "above_limit" ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>{item.followersCount.toLocaleString("pt-BR")} seguidores</span> : <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">contagem pendente</span>}</div><p className="mt-1 text-xs text-slate-500">{reviewFlags[item.username] ? "Leitura automática inconclusiva · " : ""}{item.reasons.join(" · ")} · Fonte: {sourceLabel(item.dataSource)}</p></div><div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => openProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Abrir perfil</button><button type="button" onClick={() => void reviewProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">{reviewFlags[item.username] ? "Revisar novamente" : "Revisar"}</button>{typeof item.followersCount !== "number" ? <button type="button" onClick={() => saveManualFollowers(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Informar seguidores</button> : null}<button type="button" onClick={() => addProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700"><ShieldCheck size={14} /> Proteger</button></div></div>)}{!activeList.length ? <div className="p-8 text-center text-sm text-slate-500">{tab === "priority" ? "Nenhum perfil com contagem conhecida está dentro do limite atual." : tab === "above" ? "Nenhum perfil conhecido está acima do limite atual." : "Nenhum perfil aguardando enriquecimento."}</div> : null}</div>}
       </section>
     </div>
   );
