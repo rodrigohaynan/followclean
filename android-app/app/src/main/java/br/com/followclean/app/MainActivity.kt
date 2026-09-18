@@ -126,7 +126,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.9"
+                "FollowCleanAndroid/0.3.10"
         }
 
         CookieManager.getInstance().apply {
@@ -742,16 +742,16 @@ class MainActivity : Activity() {
             return
         }
 
-        clearFailure(username)
+        saveFailure(username, "no_response")
         processedThisRun++
         currentIndex++
         currentUsername = null
         persistState()
 
         val message =
-            "Não foi possível confirmar @$username após $maxExtractionAttempts tentativas. Mantido em Revisar."
+            "Não houve resposta utilizável em @$username após $maxExtractionAttempts tentativas. Movido para Indisponíveis."
         updateStatus(message)
-        sendReviewNeededToWeb(username, "unreadable")
+        sendUnavailableToWeb(username, "no_response")
         sendResultsToWeb()
         sendBatchStatus(message)
         handler.postDelayed({ processNext() }, betweenProfilesMs)
@@ -808,7 +808,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.9")
+                .put("version", "0.3.10")
         )
     }
 
