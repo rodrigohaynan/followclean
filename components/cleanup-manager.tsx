@@ -33,6 +33,9 @@ import {
 } from "@/lib/storage/indexeddb";
 
 type Tab = "priority" | "review" | "protected" | "unavailable";
+type InitialFilter = "all" | "special" | "0-9" | (typeof ALPHABET)[number];
+
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("") as readonly string[];
 
 type UnavailableProfile = {
   username: string;
@@ -47,6 +50,15 @@ function sourceLabel(source: ProfileMetadata["dataSource"]) {
   if (source === "android") return "Android";
   if (source === "manual") return "Manual";
   return "Pendente";
+}
+
+function matchesInitial(username: string, filter: InitialFilter) {
+  if (filter === "all") return true;
+
+  const first = username.trim().charAt(0).toUpperCase();
+  if (filter === "special") return first === "_" || first === ".";
+  if (filter === "0-9") return /^[0-9]$/.test(first);
+  return first === filter;
 }
 
 function unavailableReasonLabel(reason: string) {
@@ -68,6 +80,7 @@ export function CleanupManager() {
   const [query, setQuery] = useState("");
   const [newProtected, setNewProtected] = useState("");
   const [tab, setTab] = useState<Tab>("priority");
+  const [initialFilter, setInitialFilter] = useState<InitialFilter>("all");
   const [extensionReady, setExtensionReady] = useState(false);
   const [androidReady, setAndroidReady] = useState(false);
   const [extensionNote, setExtensionNote] = useState("Aguardando integração...");
@@ -293,10 +306,52 @@ export function CleanupManager() {
     [queue, unavailableSet],
   );
   const normalizedQuery = query.trim().toLowerCase().replace(/^@/, "");
-  const filteredPriority = useMemo(() => normalizedQuery ? priority.filter((item) => item.username.includes(normalizedQuery)) : priority, [priority, normalizedQuery]);
-  const filteredReview = useMemo(() => normalizedQuery ? review.filter((item) => item.username.includes(normalizedQuery)) : review, [review, normalizedQuery]);
-  const filteredProtected = useMemo(() => normalizedQuery ? protectedProfiles.filter((item) => item.username.includes(normalizedQuery)) : protectedProfiles, [protectedProfiles, normalizedQuery]);
-  const filteredUnavailable = useMemo(() => normalizedQuery ? unavailable.filter((item) => item.username.includes(normalizedQuery)) : unavailable, [unavailable, normalizedQuery]);
+  const filteredPriority = useMemo(
+    () => priority.filter((item) =>
+      matchesInitial(item.username, initialFilter) &&
+      (!normalizedQuery || item.username.includes(normalizedQuery))
+    ),
+    [priority, normalizedQuery, initialFilter],
+  );
+  const filteredReview = useMemo(
+    () => review.filter((item) =>
+      matchesInitial(item.username, initialFilter) &&
+      (!normalizedQuery || item.username.includes(normalizedQuery))
+    ),
+    [review, normalizedQuery, initialFilter],
+  );
+  const filteredProtected = useMemo(
+    () => protectedProfiles.filter((item) =>
+      matchesInitial(item.username, initialFilter) &&
+      (!normalizedQuery || item.username.includes(normalizedQuery))
+    ),
+    [protectedProfiles, normalizedQuery, initialFilter],
+  );
+  const filteredUnavailable = useMemo(
+    () => unavailable.filter((item) =>
+      matchesInitial(item.username, initialFilter) &&
+      (!normalizedQuery || item.username.includes(normalizedQuery))
+    ),
+    [unavailable, normalizedQuery, initialFilter],
+  );
+
+  const initialSource = useMemo(() => {
+    if (tab === "priority") return priority.map((item) => item.username);
+    if (tab === "review") return review.map((item) => item.username);
+    if (tab === "protected") return protectedProfiles.map((item) => item.username);
+    return unavailable.map((item) => item.username);
+  }, [tab, priority, review, protectedProfiles, unavailable]);
+
+  const availableInitials = useMemo(() => {
+    const values = new Set<string>();
+    for (const username of initialSource) {
+      const first = username.trim().charAt(0).toUpperCase();
+      if (first === "_" || first === ".") values.add("special");
+      else if (/^[0-9]$/.test(first)) values.add("0-9");
+      else if (/^[A-Z]$/.test(first)) values.add(first);
+    }
+    return values;
+  }, [initialSource]);
 
   async function addProtected(username: string) {
     const record = await protectProfile(username);
@@ -440,7 +495,63 @@ export function CleanupManager() {
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2 font-black text-slate-950"><ShieldCheck size={19} className="text-emerald-600" /> Lista protegida</div><p className="mt-1 text-sm text-slate-500">Adicione família, amigos, clientes, parceiros ou qualquer conta estratégica.</p></div><form className="flex w-full gap-2 lg:max-w-md" onSubmit={(event) => { event.preventDefault(); if (newProtected.trim()) addProtected(newProtected); }}><input value={newProtected} onChange={(event) => setNewProtected(event.target.value)} placeholder="@usuario" className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-blue-400 focus:bg-white" /><button type="submit" className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white"><Plus size={16} /> Proteger</button></form></div></section>
 
       <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-4 border-b border-slate-200 p-6 lg:flex-row lg:items-center lg:justify-between"><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setTab("priority")} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "priority" ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600"}`}>Prioridade ({priority.length.toLocaleString("pt-BR")})</button><button type="button" onClick={() => setTab("review")} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "review" ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>Revisar ({review.length.toLocaleString("pt-BR")})</button><button type="button" onClick={() => setTab("protected")} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "protected" ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>Protegidos ({protectedProfiles.length.toLocaleString("pt-BR")})</button><button type="button" onClick={() => setTab("unavailable")} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "unavailable" ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-600"}`}>Indisponíveis ({unavailable.length.toLocaleString("pt-BR")})</button></div><div className="relative w-full lg:w-72"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar @usuario" className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-400 focus:bg-white" /></div></div>
+        <div className="border-b border-slate-200 p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setTab("priority")} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "priority" ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600"}`}>Prioridade ({priority.length.toLocaleString("pt-BR")})</button>
+              <button type="button" onClick={() => setTab("review")} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "review" ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>Revisar ({review.length.toLocaleString("pt-BR")})</button>
+              <button type="button" onClick={() => setTab("protected")} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "protected" ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>Protegidos ({protectedProfiles.length.toLocaleString("pt-BR")})</button>
+              <button type="button" onClick={() => setTab("unavailable")} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "unavailable" ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-600"}`}>Indisponíveis ({unavailable.length.toLocaleString("pt-BR")})</button>
+            </div>
+            <div className="relative w-full lg:w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar @usuario" className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-400 focus:bg-white" />
+            </div>
+          </div>
+
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">Ir para inicial</p>
+            <div className="overflow-x-auto pb-1">
+              <div className="flex min-w-max gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setInitialFilter("all")}
+                  className={`rounded-lg px-3 py-2 text-xs font-black transition ${initialFilter === "all" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                >
+                  Todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInitialFilter("special")}
+                  disabled={!availableInitials.has("special")}
+                  className={`rounded-lg px-3 py-2 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-30 ${initialFilter === "special" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                  title="Usuários iniciados por _ ou ."
+                >
+                  _.
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInitialFilter("0-9")}
+                  disabled={!availableInitials.has("0-9")}
+                  className={`rounded-lg px-3 py-2 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-30 ${initialFilter === "0-9" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                >
+                  0–9
+                </button>
+                {ALPHABET.map((letter) => (
+                  <button
+                    key={letter}
+                    type="button"
+                    onClick={() => setInitialFilter(letter as InitialFilter)}
+                    disabled={!availableInitials.has(letter)}
+                    className={`min-w-9 rounded-lg px-2.5 py-2 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-30 ${initialFilter === letter ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                  >
+                    {letter}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
         {tab === "protected" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredProtected.map((item) => <div key={item.username} className="flex items-center justify-between gap-4 px-6 py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">Protegido neste dispositivo</p></div><button type="button" onClick={() => removeProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"><X size={14} /> Remover proteção</button></div>)}{!filteredProtected.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil protegido.</div> : null}</div> : tab === "unavailable" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredUnavailable.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-2 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">{unavailableReasonLabel(item.reason)} · Fonte: {item.source === "import" ? "arquivo do Instagram" : "verificação automática"}</p></div>{!item.username.startsWith("__deleted__") ? <a href={`https://www.instagram.com/${encodeURIComponent(item.username)}/`} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Testar perfil</a> : null}</div>)}{!filteredUnavailable.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil indisponível identificado.</div> : null}</div> : <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{activeList.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-black text-slate-900">@{item.username}</p>{typeof item.followersCount === "number" ? <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-black text-red-700">{item.followersCount.toLocaleString("pt-BR")} seguidores</span> : <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">contagem pendente</span>}</div><p className="mt-1 text-xs text-slate-500">{item.reasons.join(" · ")} · Fonte: {sourceLabel(item.dataSource)}</p></div><div className="flex shrink-0 flex-wrap gap-2"><a href={`https://www.instagram.com/${encodeURIComponent(item.username)}/`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Abrir perfil</a>{typeof item.followersCount !== "number" ? <button type="button" onClick={() => saveManualFollowers(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Informar seguidores</button> : null}<button type="button" onClick={() => addProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700"><ShieldCheck size={14} /> Proteger</button></div></div>)}{!activeList.length ? <div className="p-8 text-center text-sm text-slate-500">{tab === "priority" ? "Nenhum perfil com contagem conhecida está dentro do limite atual." : "Nenhum perfil aguardando enriquecimento."}</div> : null}</div>}
       </section>
     </div>
