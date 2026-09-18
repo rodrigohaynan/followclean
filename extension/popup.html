@@ -28,12 +28,25 @@
         <p id="nextHint">Envie a fila pela página Limpeza do FollowClean.</p>
       </section>
 
-      <button id="openNext" class="primary" disabled>Abrir próximo perfil</button>
+      <section class="batch-card">
+        <div class="batch-head">
+          <span class="eyebrow">Verificação automática</span>
+          <strong id="batchStatus">Parado</strong>
+        </div>
+        <p id="batchMessage">Processa até 50 perfis por lote, um por vez.</p>
+        <div class="progress"><span id="batchProgress"></span></div>
+        <div class="batch-actions">
+          <button id="startBatch" class="primary">Verificar automaticamente</button>
+          <button id="pauseBatch" class="secondary" disabled>Pausar</button>
+        </div>
+      </section>
+
+      <button id="openNext" class="secondary" disabled>Abrir próximo manualmente</button>
       <button id="openFollowClean" class="secondary">Abrir FollowClean</button>
 
       <p class="footnote">
-        A extensão captura somente a contagem exibida no perfil que você abrir.
-        Ela não executa unfollow automático.
+        A extensão visita perfis da fila um por vez e captura apenas a contagem pública exibida.
+        Ela pausa se o Instagram mostrar login, verificação ou bloqueio e não executa unfollow automático.
       </p>
     </main>
     <script src="popup.js"></script>
