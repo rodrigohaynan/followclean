@@ -87,7 +87,9 @@ class MainActivity : Activity() {
         configureScannerWebView()
         restoreState()
 
-        mainWebView.loadUrl("https://followclean.netlify.app/limpeza")
+        if (!handleIncomingIntent(intent)) {
+            mainWebView.loadUrl("https://followclean.netlify.app/limpeza")
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -105,7 +107,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.2.3"
+                "FollowCleanAndroid/0.3.0"
         }
 
         CookieManager.getInstance().apply {
@@ -259,6 +261,16 @@ class MainActivity : Activity() {
         }
 
         val host = uri.host.orEmpty().lowercase()
+
+        if (
+            (scheme == "https" || scheme == "http") &&
+            (host == "instagram.com" || host.endsWith(".instagram.com")) &&
+            uri.path.orEmpty().startsWith("/oauth/authorize")
+        ) {
+            openOAuthInBrowser(uri)
+            return true
+        }
+
         val allowedHost =
             host == "followclean.netlify.app" ||
             host == "instagram.com" ||
@@ -291,6 +303,63 @@ class MainActivity : Activity() {
             updateStatus("Link externo não pôde ser aberto.")
         }
         return true
+    }
+
+    private fun openOAuthInBrowser(uri: Uri) {
+        val chromeIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+            setPackage("com.android.chrome")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        val opened = runCatching {
+            startActivity(chromeIntent)
+            true
+        }.getOrDefault(false)
+
+        if (!opened) {
+            runCatching {
+                startActivity(
+                    Intent(Intent.ACTION_VIEW, uri).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
+            }
+        }
+
+        updateStatus("Autorize no navegador. Depois você voltará automaticamente ao FollowClean.")
+    }
+
+    private fun handleIncomingIntent(sourceIntent: Intent?): Boolean {
+        val data = sourceIntent?.data ?: return false
+        if (
+            data.scheme != "followclean" ||
+            data.host != "oauth" ||
+            data.path != "/complete"
+        ) {
+            return false
+        }
+
+        val handoff = data.getQueryParameter("handoff")
+        if (handoff.isNullOrBlank()) {
+            updateStatus("Retorno do Instagram inválido. Inicie a conexão novamente.")
+            mainWebView.loadUrl(
+                "https://followclean.netlify.app/conectar?status=android_handoff_error"
+            )
+            return true
+        }
+
+        updateStatus("Finalizando conexão do Instagram...")
+        val redeemUrl =
+            "https://followclean.netlify.app/api/instagram/android-complete?handoff=" +
+                Uri.encode(handoff)
+        mainWebView.loadUrl(redeemUrl)
+        return true
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -492,7 +561,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.2.3")
+                .put("version", "0.3.0")
         )
     }
 
