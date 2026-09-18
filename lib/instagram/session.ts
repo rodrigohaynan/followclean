@@ -1,3 +1,10 @@
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from "node:crypto";
+
 export type InstagramConnectedAccount = {
   id: string;
   username: string;
@@ -13,9 +20,6 @@ export type InstagramSession = {
   account: InstagramConnectedAccount;
 };
 
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-
 function getSecret() {
   const dedicated = process.env.FOLLOWCLEAN_SESSION_SECRET?.trim();
   if (dedicated) return dedicated;
@@ -26,44 +30,55 @@ function getSecret() {
   throw new Error("Nenhum segredo de sessão está configurado.");
 }
 
-async function getKey() {
-  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(getSecret()));
-  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
-}
-
-function toBase64Url(bytes: Uint8Array) {
-  return Buffer.from(bytes).toString("base64url");
-}
-
-function fromBase64Url(value: string) {
-  return new Uint8Array(Buffer.from(value, "base64url"));
+function getKey() {
+  return createHash("sha256").update(getSecret(), "utf8").digest();
 }
 
 export async function sealInstagramSession(session: InstagramSession) {
-  const key = await getKey();
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    key,
-    encoder.encode(JSON.stringify(session)),
-  );
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", getKey(), iv);
+  const encrypted = Buffer.concat([
+    cipher.update(JSON.stringify(session), "utf8"),
+    cipher.final(),
+  ]);
+  const authTag = cipher.getAuthTag();
 
-  return `${toBase64Url(iv)}.${toBase64Url(new Uint8Array(encrypted))}`;
+  return [
+    iv.toString("base64url"),
+    authTag.toString("base64url"),
+    encrypted.toString("base64url"),
+  ].join(".");
 }
 
-export async function unsealInstagramSession(value?: string | null): Promise<InstagramSession | null> {
+export async function unsealInstagramSession(
+  value?: string | null,
+): Promise<InstagramSession | null> {
   if (!value) return null;
+
   try {
-    const [ivPart, dataPart] = value.split(".");
-    if (!ivPart || !dataPart) return null;
-    const key = await getKey();
-    const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: fromBase64Url(ivPart) },
-      key,
-      fromBase64Url(dataPart),
+    const [ivPart, tagPart, dataPart] = value.split(".");
+    if (!ivPart || !tagPart || !dataPart) return null;
+
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      getKey(),
+      Buffer.from(ivPart, "base64url"),
     );
-    const session = JSON.parse(decoder.decode(decrypted)) as InstagramSession;
-    if (session.expiresAt && new Date(session.expiresAt).getTime() <= Date.now()) return null;
+    decipher.setAuthTag(Buffer.from(tagPart, "base64url"));
+
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(dataPart, "base64url")),
+      decipher.final(),
+    ]);
+
+    const session = JSON.parse(decrypted.toString("utf8")) as InstagramSession;
+    if (
+      session.expiresAt &&
+      new Date(session.expiresAt).getTime() <= Date.now()
+    ) {
+      return null;
+    }
+
     return session;
   } catch {
     return null;
