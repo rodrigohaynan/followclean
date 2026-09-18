@@ -47,7 +47,16 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm"><UsersRound size={21} /></div>
           <div><p className="text-lg font-black tracking-tight">FollowClean</p><p className="text-xs text-slate-500">Conexão oficial Meta</p></div>
         </Link>
-        <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm"><ArrowLeft size={16} /> Dashboard</Link>
+        <div className="flex items-center gap-2">
+          {session ? (
+            <Link href="/limpeza" className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm">
+              <ShieldCheck size={16} /> Limpeza
+            </Link>
+          ) : null}
+          <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm">
+            <ArrowLeft size={16} /> Dashboard
+          </Link>
+        </div>
       </header>
 
       <section className="mx-auto max-w-5xl px-6 pt-8">
@@ -71,7 +80,12 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
                   {typeof session.account.followsCount === "number" ? <span className="rounded-lg bg-slate-100 px-3 py-1.5 font-semibold">{session.account.followsCount.toLocaleString("pt-BR")} seguindo</span> : null}
                 </div>
               </div>
-              <form action="/api/instagram/disconnect" method="post"><button type="submit" className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-black text-red-700"><Unplug size={17} /> Desconectar</button></form>
+              <div className="flex flex-wrap gap-2">
+                <Link href="/limpeza" className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-black text-white">
+                  <ShieldCheck size={17} /> Ir para Limpeza
+                </Link>
+                <form action="/api/instagram/disconnect" method="post"><button type="submit" className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-black text-red-700"><Unplug size={17} /> Desconectar</button></form>
+              </div>
             </div>
           </section>
         ) : (
