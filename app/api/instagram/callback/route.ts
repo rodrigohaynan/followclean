@@ -59,19 +59,25 @@ export async function GET(request: NextRequest) {
   }
 
   let isAndroidFlow = verifyAndroidOAuthState(state);
-  let androidStateRecord: { deviceKeyHash: string } | null = null;
+  let stateValidatedServerSide = false;
+  let androidStateRecord: { deviceKeyHash: string | null } | null = null;
 
   if (!isAndroidFlow && isStoredAndroidOAuthState(state)) {
     try {
       androidStateRecord = await consumeStoredAndroidOAuthState(state);
-      isAndroidFlow = Boolean(androidStateRecord);
+      stateValidatedServerSide = Boolean(androidStateRecord);
+      isAndroidFlow = Boolean(androidStateRecord?.deviceKeyHash);
     } catch (error) {
       console.error("[Instagram OAuth] android_state_lookup_error", error);
       return redirectWithStatus(request, "android_state_error");
     }
   }
 
-  if (!isAndroidFlow && (!expectedState || state !== expectedState)) {
+  if (
+    !isAndroidFlow &&
+    !stateValidatedServerSide &&
+    (!expectedState || state !== expectedState)
+  ) {
     return redirectWithStatus(request, "state_error");
   }
 
