@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAndroidOAuthState } from "@/lib/instagram/oauth-state";
-import { createStoredAndroidOAuthState } from "@/lib/instagram/android-oauth-state-store";
+import {
+  createAndroidBrowserOAuthState,
+  createAndroidOAuthState,
+} from "@/lib/instagram/oauth-state";
 
 const OAUTH_STATE_COOKIE = "followclean_ig_oauth_state";
 
@@ -31,17 +33,11 @@ export async function GET(request: NextRequest) {
   const userAgent = request.headers.get("user-agent") ?? "";
   const isFollowCleanAndroid = /FollowCleanAndroid/i.test(userAgent);
   const isAndroid = /Android/i.test(userAgent);
-  let state: string;
-
-  if (isFollowCleanAndroid) {
-    state = createAndroidOAuthState();
-  } else if (isAndroid) {
-    // No Chrome Android, não dependemos de cookie para validar o state.
-    // Alguns fluxos da Meta mudam de aba/app e podem perder o cookie.
-    state = await createStoredAndroidOAuthState();
-  } else {
-    state = crypto.randomUUID().replaceAll("-", "");
-  }
+  const state = isFollowCleanAndroid
+    ? createAndroidOAuthState()
+    : isAndroid
+      ? createAndroidBrowserOAuthState()
+      : crypto.randomUUID().replaceAll("-", "");
 
   const destination = buildAuthUrl(appId, redirectUri, state);
   const response = NextResponse.redirect(destination);
