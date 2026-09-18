@@ -16,6 +16,8 @@ function classifyTokenExchangeError(details: string) {
   if (
     value.includes("client_secret") ||
     value.includes("client secret") ||
+    value.includes("app secret") ||
+    value.includes("invalid secret") ||
     value.includes("invalid client") ||
     value.includes("invalid_client")
   ) return "client_credentials_error";
