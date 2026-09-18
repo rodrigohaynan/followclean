@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createAndroidOAuthState } from "@/lib/instagram/oauth-state";
 
 const OAUTH_STATE_COOKIE = "followclean_ig_oauth_state";
 
@@ -26,10 +27,12 @@ export async function GET(request: NextRequest) {
   const redirectUri =
     process.env.INSTAGRAM_REDIRECT_URI ??
     `${request.nextUrl.origin}/api/instagram/callback`;
-  const state = crypto.randomUUID().replaceAll("-", "");
   const userAgent = request.headers.get("user-agent") ?? "";
   const isFollowCleanAndroid = /FollowCleanAndroid/i.test(userAgent);
   const isAndroid = /Android/i.test(userAgent);
+  const state = isFollowCleanAndroid
+    ? createAndroidOAuthState()
+    : crypto.randomUUID().replaceAll("-", "");
 
   // O APK possui WebView própria e trata intent:// internamente.
   // Portanto, ele deve ir direto ao OAuth do Instagram e nunca à
@@ -41,12 +44,14 @@ export async function GET(request: NextRequest) {
       : buildAuthUrl(appId, redirectUri, state);
 
   const response = NextResponse.redirect(destination);
-  response.cookies.set(OAUTH_STATE_COOKIE, state, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 10,
-  });
+  if (!isFollowCleanAndroid) {
+    response.cookies.set(OAUTH_STATE_COOKIE, state, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 10,
+    });
+  }
   return response;
 }
