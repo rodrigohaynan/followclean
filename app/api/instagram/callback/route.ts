@@ -44,13 +44,10 @@ export async function GET(request: NextRequest) {
   const appSecret = process.env.INSTAGRAM_APP_SECRET;
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
-  const acceptedStates = (request.cookies.get(OAUTH_STATE_COOKIE)?.value ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const expectedState = request.cookies.get(OAUTH_STATE_COOKIE)?.value;
 
   if (!appId || !appSecret) return redirectWithStatus(request, "setup");
-  if (!code || !state || !acceptedStates.includes(state)) {
+  if (!code || !state || !expectedState || state !== expectedState) {
     return redirectWithStatus(request, "state_error");
   }
 
