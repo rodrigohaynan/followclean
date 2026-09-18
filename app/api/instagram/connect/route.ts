@@ -28,11 +28,17 @@ export async function GET(request: NextRequest) {
     `${request.nextUrl.origin}/api/instagram/callback`;
   const state = crypto.randomUUID().replaceAll("-", "");
   const userAgent = request.headers.get("user-agent") ?? "";
+  const isFollowCleanAndroid = /FollowCleanAndroid/i.test(userAgent);
   const isAndroid = /Android/i.test(userAgent);
 
-  const destination = isAndroid
-    ? new URL("/conectar/autorizar", request.url)
-    : buildAuthUrl(appId, redirectUri, state);
+  // O APK possui WebView própria e trata intent:// internamente.
+  // Portanto, ele deve ir direto ao OAuth do Instagram e nunca à
+  // página intermediária que força abertura no Chrome.
+  const destination = isFollowCleanAndroid
+    ? buildAuthUrl(appId, redirectUri, state)
+    : isAndroid
+      ? new URL("/conectar/autorizar", request.url)
+      : buildAuthUrl(appId, redirectUri, state);
 
   const response = NextResponse.redirect(destination);
   response.cookies.set(OAUTH_STATE_COOKIE, state, {
