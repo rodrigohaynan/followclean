@@ -1,21 +1,30 @@
-import { neon } from "@neondatabase/serverless";
+import { getDatabase } from "@netlify/database";
+
+type QueryableSql = ReturnType<typeof getDatabase>["sql"] & {
+  query: (text: string, params?: unknown[]) => Promise<Record<string, unknown>[]>;
+};
 
 let schemaReady: Promise<void> | null = null;
+let sqlClient: QueryableSql | null = null;
 
 export function cloudDatabaseConfigured() {
-  return Boolean(process.env.FOLLOWCLEAN_DATABASE_URL || process.env.DATABASE_URL);
+  // Netlify Database is provisioned and connected automatically in production.
+  return true;
 }
 
-export function getCloudSql() {
-  const url =
-    process.env.FOLLOWCLEAN_DATABASE_URL?.trim() ||
-    process.env.DATABASE_URL?.trim();
+export function getCloudSql(): QueryableSql {
+  if (sqlClient) return sqlClient;
 
-  if (!url) {
-    throw new Error("FOLLOWCLEAN_DATABASE_URL não configurada.");
-  }
+  const database = getDatabase();
+  const sql = database.sql as QueryableSql;
 
-  return neon(url);
+  sql.query = async (text: string, params: unknown[] = []) => {
+    const result = await database.pool.query(text, params);
+    return result.rows as Record<string, unknown>[];
+  };
+
+  sqlClient = sql;
+  return sqlClient;
 }
 
 export async function ensureCloudSchema() {
@@ -109,15 +118,6 @@ export async function ensureCloudSchema() {
     await sql`
       CREATE INDEX IF NOT EXISTS followclean_cleanup_snapshot_updated_idx
       ON followclean_cleanup_snapshot (updated_at DESC)
-    `;
-
-    await sql`
-      CREATE TABLE IF NOT EXISTS followclean_run_lock (
-        owner_id TEXT PRIMARY KEY,
-        active_device_id TEXT NOT NULL,
-        lease_until TIMESTAMPTZ NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
     `;
   })();
 
