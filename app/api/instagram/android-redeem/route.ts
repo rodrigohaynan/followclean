@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { consumePendingAndroidSession } from "@/lib/instagram/android-pending-session";
+import { readPendingAndroidSession } from "@/lib/instagram/android-pending-session";
 import { sealInstagramSession } from "@/lib/instagram/session";
 
 const SESSION_COOKIE = "followclean_ig_session";
@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const session = await consumePendingAndroidSession(deviceKey);
+    const session = await readPendingAndroidSession(deviceKey);
     if (!session) {
       const waiting = NextResponse.redirect(
         new URL("/conectar?status=android_waiting", request.url),
