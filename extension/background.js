@@ -48,7 +48,11 @@ function clearTimers() {
 
 async function nextPending() {
   const { queue, results, failures } = await getState();
-  return queue.find((username) => !results[username] && !failures[username]) || null;
+  return queue.find((username) => {
+    const result = results[username];
+    const validResult = result && Number(result.parserVersion || 0) >= 2;
+    return !validResult && !failures[username];
+  }) || null;
 }
 
 async function ensureWorkerTab(username, existingTabId) {
@@ -135,7 +139,6 @@ async function startBatch() {
   clearTimers();
   const state = await getState();
 
-  await chrome.storage.local.set({ followcleanFailures: {} });
   await saveBatch({
     running: true,
     currentUsername: null,
@@ -163,6 +166,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "FOLLOWCLEAN_GET_STATUS") {
     void getState().then((state) => sendResponse({ ok: true, batch: state.batch }));
+    return true;
+  }
+
+  if (message.type === "FOLLOWCLEAN_PROFILE_UNAVAILABLE") {
+    const username = normalizeUsername(message.username);
+    if (!username) return;
+
+    void (async () => {
+      clearTimeout(timeoutTimer);
+      timeoutTimer = null;
+
+      const state = await getState();
+      await markFailure(username, message.reason || "unavailable");
+
+      if (!state.batch.running) return;
+
+      const processed = (state.batch.processedThisRun || 0) + 1;
+      await saveBatch({
+        processedThisRun: processed,
+        currentUsername: null,
+        lastMessage: `@${username} está indisponível. Movido para a lista separada.`
+      });
+      await scheduleNext();
+    })();
+
+    sendResponse({ ok: true });
     return true;
   }
 
