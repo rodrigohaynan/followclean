@@ -17,9 +17,13 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 function getSecret() {
-  const secret = process.env.FOLLOWCLEAN_SESSION_SECRET;
-  if (!secret) throw new Error("FOLLOWCLEAN_SESSION_SECRET não configurado.");
-  return secret;
+  const dedicated = process.env.FOLLOWCLEAN_SESSION_SECRET?.trim();
+  if (dedicated) return dedicated;
+
+  const appSecret = process.env.INSTAGRAM_APP_SECRET?.trim();
+  if (appSecret) return `${appSecret}:followclean-session-v1`;
+
+  throw new Error("Nenhum segredo de sessão está configurado.");
 }
 
 async function getKey() {
