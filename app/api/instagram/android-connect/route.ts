@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createStoredAndroidOAuthState } from "@/lib/instagram/android-oauth-state-store";
+import { createAndroidOAuthState } from "@/lib/instagram/oauth-state";
 
 function buildAuthUrl(appId: string, redirectUri: string, state: string) {
   const authUrl = new URL("https://www.instagram.com/oauth/authorize");
@@ -26,7 +27,11 @@ export async function GET(request: NextRequest) {
     const redirectUri =
       process.env.INSTAGRAM_REDIRECT_URI ??
       `${request.nextUrl.origin}/api/instagram/callback`;
-    const state = await createStoredAndroidOAuthState();
+    const deviceKey = request.nextUrl.searchParams.get("deviceKey")?.trim() ?? "";
+    const state =
+      deviceKey.length >= 16
+        ? await createStoredAndroidOAuthState(deviceKey)
+        : createAndroidOAuthState();
 
     return NextResponse.redirect(buildAuthUrl(appId, redirectUri, state));
   } catch (error) {
