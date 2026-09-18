@@ -37,6 +37,7 @@ type Tab = "priority" | "review" | "protected";
 function sourceLabel(source: ProfileMetadata["dataSource"]) {
   if (source === "meta_business_discovery") return "Meta";
   if (source === "extension") return "Extensão";
+  if (source === "android") return "Android";
   if (source === "manual") return "Manual";
   return "Pendente";
 }
@@ -51,7 +52,8 @@ export function CleanupManager() {
   const [newProtected, setNewProtected] = useState("");
   const [tab, setTab] = useState<Tab>("priority");
   const [extensionReady, setExtensionReady] = useState(false);
-  const [extensionNote, setExtensionNote] = useState("Aguardando extensão...");
+  const [androidReady, setAndroidReady] = useState(false);
+  const [extensionNote, setExtensionNote] = useState("Aguardando integração...");
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchCurrent, setBatchCurrent] = useState<string | null>(null);
   const [batchProcessed, setBatchProcessed] = useState(0);
@@ -96,15 +98,44 @@ export function CleanupManager() {
         } | null;
       };
 
-      if (data?.source !== "followclean-extension") return;
+      const fromExtension = data?.source === "followclean-extension";
+      const fromAndroid = data?.source === "followclean-android";
+      if (!fromExtension && !fromAndroid) return;
 
       if (data.type === "READY") {
-        setExtensionReady(true);
-        setExtensionNote("Extensão detectada e pronta.");
-        window.postMessage(
-          { source: "followclean-web", type: "GET_RESULTS" },
-          "*",
+        if (fromAndroid) {
+          setAndroidReady(true);
+          setExtensionNote("Aplicativo Android detectado e pronto.");
+          const bridge = (window as Window & {
+            FollowCleanAndroid?: { postMessage: (message: string) => void };
+          }).FollowCleanAndroid;
+          bridge?.postMessage(JSON.stringify({ type: "GET_RESULTS" }));
+        } else {
+          setExtensionReady(true);
+          setExtensionNote("Extensão detectada e pronta.");
+          window.postMessage(
+            { source: "followclean-web", type: "GET_RESULTS" },
+            "*",
+          );
+        }
+        return;
+      }
+
+      if (data.type === "BATCH_STATUS" && data.batch) {
+        setBatchRunning(Boolean(data.batch.running));
+        setBatchCurrent(
+          typeof data.batch.currentUsername === "string"
+            ? data.batch.currentUsername
+            : null,
         );
+        setBatchProcessed(
+          typeof data.batch.processedThisRun === "number"
+            ? data.batch.processedThisRun
+            : 0,
+        );
+        if (typeof data.batch.lastMessage === "string") {
+          setExtensionNote(data.batch.lastMessage);
+        }
         return;
       }
 
@@ -146,7 +177,7 @@ export function CleanupManager() {
           return [{
             username: item.username.trim().toLowerCase().replace(/^@/, ""),
             followersCount: item.followersCount,
-            dataSource: "extension" as const,
+            dataSource: fromAndroid ? ("android" as const) : ("extension" as const),
             updatedAt:
               typeof item.updatedAt === "string"
                 ? item.updatedAt
@@ -159,7 +190,7 @@ export function CleanupManager() {
         void upsertProfileMetadataBatch(records).then(() => {
           mergeMetadata(records);
           setExtensionNote(
-            `${records.length.toLocaleString("pt-BR")} contagens sincronizadas da extensão.`,
+            `${records.length.toLocaleString("pt-BR")} contagens sincronizadas ${fromAndroid ? "do Android" : "da extensão"}.`,
           );
         });
       }
@@ -167,6 +198,16 @@ export function CleanupManager() {
 
     window.addEventListener("message", handleMessage);
     window.postMessage({ source: "followclean-web", type: "PING" }, "*");
+
+    const bridge = (window as Window & {
+      FollowCleanAndroid?: { postMessage: (message: string) => void };
+    }).FollowCleanAndroid;
+    if (bridge?.postMessage) {
+      setAndroidReady(true);
+      setExtensionNote("Aplicativo Android detectado e pronto.");
+      bridge.postMessage(JSON.stringify({ type: "PING" }));
+      bridge.postMessage(JSON.stringify({ type: "GET_RESULTS" }));
+    }
 
     return () => window.removeEventListener("message", handleMessage);
   }, []);
@@ -189,6 +230,12 @@ export function CleanupManager() {
   async function toggleRule() { const next = { ...settings, notFollowingBack: !settings.notFollowingBack }; setSettings(next); await saveCleanupSettings(next); }
   async function updateMaxFollowers(value: number) { const safeValue = Number.isFinite(value) ? Math.max(0, Math.round(value)) : 2000; const next = { ...settings, maxFollowers: safeValue }; setSettings(next); await saveCleanupSettings(next); }
 
+  function androidBridge() {
+    return (window as Window & {
+      FollowCleanAndroid?: { postMessage: (message: string) => void };
+    }).FollowCleanAndroid;
+  }
+
   function sendQueueToExtension() {
     window.postMessage(
       {
@@ -201,29 +248,44 @@ export function CleanupManager() {
   }
 
   function startAutomaticVerification() {
-    window.postMessage(
-      {
-        source: "followclean-web",
-        type: "SET_QUEUE_AND_START",
-        usernames: review.map((item) => item.username),
-      },
-      "*",
-    );
+    const usernames = review.map((item) => item.username);
+    if (androidReady && androidBridge()?.postMessage) {
+      androidBridge()?.postMessage(
+        JSON.stringify({ type: "START_BATCH", usernames }),
+      );
+    } else {
+      window.postMessage(
+        {
+          source: "followclean-web",
+          type: "SET_QUEUE_AND_START",
+          usernames,
+        },
+        "*",
+      );
+    }
     setExtensionNote("Iniciando verificação automática...");
   }
 
   function pauseAutomaticVerification() {
-    window.postMessage(
-      { source: "followclean-web", type: "PAUSE_BATCH" },
-      "*",
-    );
+    if (androidReady && androidBridge()?.postMessage) {
+      androidBridge()?.postMessage(JSON.stringify({ type: "PAUSE_BATCH" }));
+    } else {
+      window.postMessage(
+        { source: "followclean-web", type: "PAUSE_BATCH" },
+        "*",
+      );
+    }
   }
 
   function syncExtensionResults() {
-    window.postMessage(
-      { source: "followclean-web", type: "GET_RESULTS" },
-      "*",
-    );
+    if (androidReady && androidBridge()?.postMessage) {
+      androidBridge()?.postMessage(JSON.stringify({ type: "GET_RESULTS" }));
+    } else {
+      window.postMessage(
+        { source: "followclean-web", type: "GET_RESULTS" },
+        "*",
+      );
+    }
   }
 
   async function saveManualFollowers(username: string) {
@@ -278,21 +340,21 @@ export function CleanupManager() {
         </div>
         <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950 sm:flex-row sm:items-center sm:justify-between"><span>A regra já entende a contagem de seguidores. A conexão oficial da Meta valida sua conta; a extensão assistida enriquece os perfis da fila.</span><Link href="/conectar" className="inline-flex shrink-0 items-center gap-2 font-black text-blue-700"><Instagram size={16} /> Instagram conectado</Link></div>
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
-          <div className={`rounded-2xl border p-4 text-sm ${extensionReady ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
-            <div className="font-black">FollowClean Assist · navegador</div>
+          <div className={`rounded-2xl border p-4 text-sm ${extensionReady || androidReady ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+            <div className="font-black">{androidReady ? "FollowClean Android · scanner nativo" : "FollowClean Assist · navegador"}</div>
             <p className="mt-1 leading-6">{extensionNote}</p>
             {batchRunning ? <p className="mt-1 text-xs font-black text-emerald-800">Lote em execução · {batchProcessed}/50 {batchCurrent ? `· @${batchCurrent}` : ""}</p> : null}
             <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" disabled={!extensionReady || review.length === 0 || batchRunning} onClick={startAutomaticVerification} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Verificar automaticamente</button>
-              <button type="button" disabled={!extensionReady || !batchRunning} onClick={pauseAutomaticVerification} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800 disabled:cursor-not-allowed disabled:opacity-40">Pausar</button>
-              <button type="button" disabled={!extensionReady || review.length === 0} onClick={sendQueueToExtension} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Só enviar fila</button>
-              <button type="button" disabled={!extensionReady} onClick={syncExtensionResults} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Sincronizar</button>
-              <Link href="/extensao" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700">Instalar extensão</Link>
+              <button type="button" disabled={(!extensionReady && !androidReady) || review.length === 0 || batchRunning} onClick={startAutomaticVerification} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Verificar automaticamente</button>
+              <button type="button" disabled={(!extensionReady && !androidReady) || !batchRunning} onClick={pauseAutomaticVerification} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800 disabled:cursor-not-allowed disabled:opacity-40">Pausar</button>
+              {!androidReady ? <button type="button" disabled={!extensionReady || review.length === 0} onClick={sendQueueToExtension} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Só enviar fila</button> : null}
+              <button type="button" disabled={!extensionReady && !androidReady} onClick={syncExtensionResults} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Sincronizar</button>
+              {!androidReady ? <Link href="/extensao" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700">Instalar extensão</Link> : null}
             </div>
           </div>
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-            <div className="font-black">Modo celular</div>
-            <p className="mt-1 leading-6">No Android Chrome, extensões não são suportadas. Abra o perfil e use “Informar seguidores” na fila para classificar o perfil imediatamente.</p>
+          <div className={`rounded-2xl border p-4 text-sm ${androidReady ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-amber-200 bg-amber-50 text-amber-950"}`}>
+            <div className="font-black">{androidReady ? "APK ativo" : "Modo celular no navegador"}</div>
+            <p className="mt-1 leading-6">{androidReady ? "O APK pode visitar os perfis da fila em uma WebView isolada, ler a contagem pública e devolver os resultados automaticamente ao FollowClean." : "No Chrome Android comum, a automação não pode ler outras páginas. Use o APK do FollowClean ou informe a contagem manualmente."}</p>
           </div>
         </div>
       </section>
