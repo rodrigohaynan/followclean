@@ -191,22 +191,48 @@ export async function POST(request: NextRequest) {
     ? (body.metadata as MetadataInput[])
     : [];
 
-  for (const item of metadata.slice(0, 20000)) {
-    const username = normalizeUsername(item.username);
-    const followersCount = Number(item.followersCount);
-    const dataSource =
-      typeof item.dataSource === "string" ? item.dataSource : "unknown";
-    const parserVersion = Number.isFinite(Number(item.parserVersion))
-      ? Math.max(0, Math.round(Number(item.parserVersion)))
-      : null;
+  const trustedMetadata = metadata
+    .slice(0, 20000)
+    .flatMap((item) => {
+      const username = normalizeUsername(item.username);
+      const followersCount = Number(item.followersCount);
+      const dataSource =
+        typeof item.dataSource === "string" ? item.dataSource : "unknown";
+      const parserVersion = Number.isFinite(Number(item.parserVersion))
+        ? Math.max(0, Math.round(Number(item.parserVersion)))
+        : null;
 
-    if (!username || !Number.isFinite(followersCount)) continue;
+      if (!username || !Number.isFinite(followersCount)) return [];
 
-    const isTrusted =
-      dataSource !== "extension" || (parserVersion ?? 0) >= 2;
-    if (!isTrusted) continue;
+      const isTrusted =
+        dataSource !== "extension" || (parserVersion ?? 0) >= 2;
+      if (!isTrusted) return [];
 
-    const updatedAt = parseDate(item.updatedAt);
+      return [{
+        username,
+        followersCount: Math.max(0, Math.round(followersCount)),
+        parserVersion,
+        dataSource,
+        updatedAt: parseDate(item.updatedAt).toISOString(),
+      }];
+    });
+
+  for (let offset = 0; offset < trustedMetadata.length; offset += 250) {
+    const chunk = trustedMetadata.slice(offset, offset + 250);
+    const params: unknown[] = [];
+    const values = chunk.map((item, index) => {
+      const base = index * 7;
+      params.push(
+        identity.ownerId,
+        identity.username,
+        item.username,
+        item.followersCount,
+        item.parserVersion,
+        item.dataSource,
+        item.updatedAt,
+      );
+      return `(${base + 1}, ${base + 2}, ${base + 3}, 'verified', ${base + 4}, ${base + 5}, ${base + 6}, NULL, NULL, ${base + 7})`;
+    });
 
     await sql.query(
       `
@@ -222,7 +248,7 @@ export async function POST(request: NextRequest) {
           lease_until,
           updated_at
         )
-        VALUES ($1, $2, $3, 'verified', $4, $5, $6, NULL, NULL, $7)
+        VALUES ${values.join(",")}
         ON CONFLICT (owner_id, username)
         DO UPDATE SET
           owner_username = EXCLUDED.owner_username,
@@ -235,15 +261,7 @@ export async function POST(request: NextRequest) {
           updated_at = EXCLUDED.updated_at
         WHERE followclean_cleanup_queue.updated_at <= EXCLUDED.updated_at
       `,
-      [
-        identity.ownerId,
-        identity.username,
-        username,
-        Math.max(0, Math.round(followersCount)),
-        parserVersion,
-        dataSource,
-        updatedAt.toISOString(),
-      ],
+      params,
     );
   }
 
@@ -251,15 +269,35 @@ export async function POST(request: NextRequest) {
     ? (body.failures as FailureInput[])
     : [];
 
-  for (const item of failures.slice(0, 20000)) {
-    const username = normalizeUsername(item.username);
-    if (!username) continue;
+  const normalizedFailures = failures
+    .slice(0, 20000)
+    .flatMap((item) => {
+      const username = normalizeUsername(item.username);
+      if (!username) return [];
+      return [{
+        username,
+        reason:
+          typeof item.reason === "string"
+            ? item.reason.slice(0, 200)
+            : "unavailable",
+        updatedAt: parseDate(item.updatedAt).toISOString(),
+      }];
+    });
 
-    const reason =
-      typeof item.reason === "string"
-        ? item.reason.slice(0, 200)
-        : "unavailable";
-    const updatedAt = parseDate(item.updatedAt);
+  for (let offset = 0; offset < normalizedFailures.length; offset += 300) {
+    const chunk = normalizedFailures.slice(offset, offset + 300);
+    const params: unknown[] = [];
+    const values = chunk.map((item, index) => {
+      const base = index * 5;
+      params.push(
+        identity.ownerId,
+        identity.username,
+        item.username,
+        item.reason,
+        item.updatedAt,
+      );
+      return `(${base + 1}, ${base + 2}, ${base + 3}, 'unavailable', ${base + 4}, NULL, ${base + 5})`;
+    });
 
     await sql.query(
       `
@@ -272,7 +310,7 @@ export async function POST(request: NextRequest) {
           lease_until,
           updated_at
         )
-        VALUES ($1, $2, $3, 'unavailable', $4, NULL, $5)
+        VALUES ${values.join(",")}
         ON CONFLICT (owner_id, username)
         DO UPDATE SET
           owner_username = EXCLUDED.owner_username,
@@ -285,13 +323,7 @@ export async function POST(request: NextRequest) {
           updated_at = EXCLUDED.updated_at
         WHERE followclean_cleanup_queue.updated_at <= EXCLUDED.updated_at
       `,
-      [
-        identity.ownerId,
-        identity.username,
-        username,
-        reason,
-        updatedAt.toISOString(),
-      ],
+      params,
     );
   }
 
