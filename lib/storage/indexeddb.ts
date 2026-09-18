@@ -218,6 +218,16 @@ export async function upsertProfileMetadataBatch(
   db.close();
 }
 
+export async function deleteProfileMetadata(usernameInput: string): Promise<void> {
+  const username = normalizeUsername(usernameInput);
+  if (!username) return;
+
+  const db = await openDatabase();
+  const tx = db.transaction(PROFILE_METADATA_STORE, "readwrite");
+  await requestToPromise(tx.objectStore(PROFILE_METADATA_STORE).delete(username));
+  db.close();
+}
+
 export async function getCleanupSettings(): Promise<CleanupSettings> {
   const db = await openDatabase();
   const tx = db.transaction(SETTINGS_STORE, "readonly");
