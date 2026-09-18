@@ -18,6 +18,10 @@ const statusMessages: Record<string, { tone: string; text: string }> = {
   setup: { tone: "border-amber-200 bg-amber-50 text-amber-900", text: "A integração está pronta no código, mas ainda faltam o App ID e o App Secret da Meta." },
   state_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "A validação de segurança do login expirou. Tente conectar novamente." },
   error: { tone: "border-red-200 bg-red-50 text-red-900", text: "A Meta não concluiu a conexão. Verifique a configuração do app e tente novamente." },
+  token_exchange_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "O Instagram autorizou o login, mas a Meta recusou a troca do código pelo token. Vamos revisar App ID, App Secret e Redirect URI." },
+  profile_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "O token foi obtido, mas a API do Instagram recusou a leitura do perfil. Vamos revisar permissões e campos da conta profissional." },
+  session_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "O Instagram conectou, mas o FollowClean não conseguiu salvar a sessão com segurança." },
+  internal_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "A conexão chegou ao FollowClean, mas ocorreu uma falha interna durante o processamento." },
 };
 
 export default async function ConectarPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
