@@ -107,7 +107,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.1"
+                "FollowCleanAndroid/0.3.2"
         }
 
         CookieManager.getInstance().apply {
@@ -331,10 +331,16 @@ class MainActivity : Activity() {
 
     private fun handleIncomingIntent(sourceIntent: Intent?): Boolean {
         val data = sourceIntent?.data ?: return false
-        if (
-            data.scheme != "followclean" ||
-            data.host != "oauth"
-        ) {
+        val isCustomReturn =
+            data.scheme == "followclean" &&
+            data.host == "oauth"
+
+        val isHttpsReturn =
+            data.scheme == "https" &&
+            data.host == "followclean.netlify.app" &&
+            data.path.orEmpty().startsWith("/app/oauth/complete")
+
+        if (!isCustomReturn && !isHttpsReturn) {
             return false
         }
 
@@ -560,7 +566,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.1")
+                .put("version", "0.3.2")
         )
     }
 
