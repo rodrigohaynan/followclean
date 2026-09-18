@@ -533,39 +533,7 @@ export function CleanupManager() {
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const response = await fetch("/api/cleanup/cloud/snapshot", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              analysis: latest.analysis,
-              sourceFile: latest.sourceFile,
-              analysisCreatedAt: latest.createdAt,
-              protectedProfiles,
-              settings,
-              metadata: profileMetadata,
-              failures: extensionFailures,
-            }),
-          });
-
-          if (!response.ok) {
-            setCloudNote("O progresso local continua salvo, mas ainda não foi enviado para a nuvem.");
-            return;
-          }
-
-          const payload = await response.json();
-          if (payload?.summary) {
-            setCloudSummary({
-              total: Number(payload.summary.total || 0),
-              pending: Number(payload.summary.pending || 0),
-              processing: Number(payload.summary.processing || 0),
-              verified: Number(payload.summary.verified || 0),
-              unavailable: Number(payload.summary.unavailable || 0),
-            });
-          }
-
-          setCloudNote(
-            "Progresso sincronizado na nuvem. Outros dispositivos podem continuar deste ponto.",
-          );
+          await uploadLocalProgressToCloud();
         } catch {
           setCloudNote("O progresso local continua salvo, mas a sincronização em nuvem falhou temporariamente.");
         }
@@ -691,6 +659,56 @@ export function CleanupManager() {
     return (window as Window & {
       FollowCleanAndroid?: { postMessage: (message: string) => void };
     }).FollowCleanAndroid;
+  }
+
+  async function uploadLocalProgressToCloud() {
+    if (!cloudConfigured) {
+      setCloudNote("A nuvem ainda não está disponível nesta sessão.");
+      return;
+    }
+    if (!latest) {
+      setCloudNote("Não há análise local neste dispositivo para enviar.");
+      return;
+    }
+
+    try {
+      setCloudNote("Enviando o progresso deste dispositivo para a nuvem...");
+      const response = await fetch("/api/cleanup/cloud/snapshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          analysis: latest.analysis,
+          sourceFile: latest.sourceFile,
+          analysisCreatedAt: latest.createdAt,
+          protectedProfiles,
+          settings,
+          metadata: profileMetadata,
+          failures: extensionFailures,
+        }),
+      });
+
+      if (!response.ok) {
+        setCloudNote("Não foi possível enviar o progresso local para a nuvem.");
+        return;
+      }
+
+      const payload = await response.json();
+      if (payload?.summary) {
+        setCloudSummary({
+          total: Number(payload.summary.total || 0),
+          pending: Number(payload.summary.pending || 0),
+          processing: Number(payload.summary.processing || 0),
+          verified: Number(payload.summary.verified || 0),
+          unavailable: Number(payload.summary.unavailable || 0),
+        });
+      }
+
+      setCloudNote(
+        "Progresso deste dispositivo enviado para a nuvem com sucesso.",
+      );
+    } catch {
+      setCloudNote("Falha temporária ao enviar o progresso para a nuvem.");
+    }
   }
 
   async function syncCloudState() {
@@ -888,6 +906,25 @@ export function CleanupManager() {
             <div className="font-black">{cloudConfigured ? "Checkpoint em nuvem ativo" : "Checkpoint em nuvem"}</div>
             <p className="mt-1 leading-6">{cloudNote}</p>
             {cloudSummary ? <p className="mt-2 text-xs font-black">Pendentes: {cloudSummary.pending.toLocaleString("pt-BR")} · Verificados: {cloudSummary.verified.toLocaleString("pt-BR")} · Indisponíveis: {cloudSummary.unavailable.toLocaleString("pt-BR")}</p> : null}
+            {cloudConfigured ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void uploadLocalProgressToCloud()}
+                  disabled={!latest}
+                  className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Enviar progresso deste dispositivo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void syncCloudState()}
+                  className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-800"
+                >
+                  Buscar progresso da nuvem
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       </section>
