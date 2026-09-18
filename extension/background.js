@@ -163,7 +163,7 @@ async function resolveNextUsername(state) {
 }
 
 async function ensureWorkerTab(username, existingTabId) {
-  const url = \`https://www.instagram.com/\${encodeURIComponent(username)}/\`;
+  const url = `https://www.instagram.com/${encodeURIComponent(username)}/`;
 
   if (existingTabId) {
     try {
@@ -242,8 +242,8 @@ async function finishCurrentProfile({
     currentUsername: null,
     lastMessage:
       status === "verified"
-        ? \`@\${username}: \${Number(followersCount || 0).toLocaleString("pt-BR")} seguidores capturados.\`
-        : \`@\${username} está indisponível. Movido para a lista separada.\`
+        ? `@${username}: ${Number(followersCount || 0).toLocaleString("pt-BR")} seguidores capturados.`
+        : `@${username} está indisponível. Movido para a lista separada.`
   });
 
   const cooldown =
@@ -254,7 +254,7 @@ async function finishCurrentProfile({
   if (cooldown === COOLDOWN_MS) {
     await saveBatch({
       lastMessage:
-        \`\${processed.toLocaleString("pt-BR")} perfis verificados nesta sessão. \` +
+        `${processed.toLocaleString("pt-BR")} perfis verificados nesta sessão. ` +
         "Pausa preventiva de 5 minutos antes de continuar."
     });
   }
@@ -295,7 +295,7 @@ async function processNext() {
     currentUsername: username,
     tabId,
     lastMessage:
-      \`Verificando @\${username} · \${(state.batch.processedThisRun || 0) + 1}º perfil desta sessão\`
+      `Verificando @${username} · ${(state.batch.processedThisRun || 0) + 1}º perfil desta sessão`
   });
 
   await scheduleTimeout();
