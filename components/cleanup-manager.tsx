@@ -26,6 +26,7 @@ import {
   getProtectedProfiles,
   protectProfile,
   deleteProfileMetadata,
+  restoreAnalysisSnapshot,
   saveCleanupSettings,
   unprotectProfile,
   upsertProfileMetadataBatch,
@@ -106,6 +107,10 @@ export function CleanupManager() {
   const [cloudSummary, setCloudSummary] = useState<CloudSummary | null>(null);
   const [cloudHydrated, setCloudHydrated] = useState(false);
   const [reviewFlags, setReviewFlags] = useState<Record<string, string>>({});
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [appSnapshotSavedAt, setAppSnapshotSavedAt] = useState<string | null>(null);
+  const [appCloudPending, setAppCloudPending] = useState(false);
+  const [lastCloudSyncAt, setLastCloudSyncAt] = useState<string | null>(null);
 
   async function applyCloudState(state: Record<string, unknown>) {
     const summary = state?.summary as Record<string, unknown> | undefined;
@@ -319,6 +324,11 @@ export function CleanupManager() {
           processedThisRun?: unknown;
           lastMessage?: unknown;
         } | null;
+        snapshot?: unknown;
+        savedAt?: unknown;
+        snapshotSavedAt?: unknown;
+        cloudSyncPending?: unknown;
+        lastCloudSyncAt?: unknown;
       };
 
       const fromExtension = data?.source === "followclean-extension";
@@ -333,6 +343,16 @@ export function CleanupManager() {
             FollowCleanAndroid?: { postMessage: (message: string) => void };
           }).FollowCleanAndroid;
           bridge?.postMessage(JSON.stringify({ type: "GET_RESULTS" }));
+          bridge?.postMessage(JSON.stringify({ type: "GET_SNAPSHOT" }));
+          if (typeof data.snapshotSavedAt === "string") {
+            setAppSnapshotSavedAt(data.snapshotSavedAt);
+          }
+          if (typeof data.cloudSyncPending === "boolean") {
+            setAppCloudPending(data.cloudSyncPending);
+          }
+          if (typeof data.lastCloudSyncAt === "string") {
+            setLastCloudSyncAt(data.lastCloudSyncAt);
+          }
         } else {
           setExtensionReady(true);
           setExtensionNote("Extensão detectada e pronta.");
@@ -340,6 +360,210 @@ export function CleanupManager() {
             { source: "followclean-web", type: "GET_RESULTS" },
             "*",
           );
+        }
+        return;
+      }
+
+      if (data.type === "SNAPSHOT_SAVED" && fromAndroid) {
+        if (typeof data.savedAt === "string") {
+          setAppSnapshotSavedAt(data.savedAt);
+        }
+        setAppCloudPending(true);
+        setExtensionNote("Progresso salvo na memória do aplicativo.");
+        return;
+      }
+
+      if (data.type === "CLOUD_SYNC_STATUS" && fromAndroid) {
+        setAppCloudPending(Boolean(data.cloudSyncPending));
+        if (typeof data.lastCloudSyncAt === "string") {
+          setLastCloudSyncAt(data.lastCloudSyncAt);
+        }
+        return;
+      }
+
+      if (data.type === "APP_SNAPSHOT" && fromAndroid) {
+        if (typeof data.savedAt === "string") {
+          setAppSnapshotSavedAt(data.savedAt);
+        }
+        setAppCloudPending(Boolean(data.cloudSyncPending));
+        if (typeof data.lastCloudSyncAt === "string") {
+          setLastCloudSyncAt(data.lastCloudSyncAt);
+        }
+
+        if (data.snapshot && typeof data.snapshot === "object") {
+          const snapshot = data.snapshot as Record<string, unknown>;
+
+          if (snapshot.latest && typeof snapshot.latest === "object") {
+            const record = snapshot.latest as StoredAnalysis;
+            if (
+              typeof record.id === "string" &&
+              typeof record.createdAt === "string" &&
+              typeof record.sourceFile === "string" &&
+              record.analysis
+            ) {
+              setLatest((current) =>
+                !current || record.createdAt > current.createdAt
+                  ? record
+                  : current,
+              );
+              void restoreAnalysisSnapshot(record);
+            }
+          }
+
+          if (Array.isArray(snapshot.protectedProfiles)) {
+            const items = snapshot.protectedProfiles.flatMap((item: unknown) => {
+              if (!item || typeof item !== "object") return [];
+              const row = item as Record<string, unknown>;
+              if (typeof row.username !== "string") return [];
+              return [{
+                username: row.username.toLowerCase(),
+                createdAt:
+                  typeof row.createdAt === "string"
+                    ? row.createdAt
+                    : new Date().toISOString(),
+                reason: typeof row.reason === "string" ? row.reason : undefined,
+              } satisfies ProtectedProfile];
+            });
+
+            if (items.length) {
+              setProtectedProfiles((current) => {
+                const map = new Map(
+                  current.map((item) => [item.username, item] as const),
+                );
+                for (const item of items) map.set(item.username, item);
+                return Array.from(map.values()).sort((a, b) =>
+                  a.username.localeCompare(b.username),
+                );
+              });
+              void Promise.all(
+                items.map((item) => protectProfile(item.username, item.reason)),
+              );
+            }
+          }
+
+          if (snapshot.settings && typeof snapshot.settings === "object") {
+            const raw = snapshot.settings as Partial<CleanupSettings>;
+            const restored: CleanupSettings = {
+              notFollowingBack:
+                typeof raw.notFollowingBack === "boolean"
+                  ? raw.notFollowingBack
+                  : DEFAULT_CLEANUP_SETTINGS.notFollowingBack,
+              maxFollowers:
+                typeof raw.maxFollowers === "number"
+                  ? raw.maxFollowers
+                  : DEFAULT_CLEANUP_SETTINGS.maxFollowers,
+            };
+            setSettings(restored);
+            void saveCleanupSettings(restored);
+          }
+
+          const metadataRows: ProfileMetadata[] = [];
+
+          if (Array.isArray(snapshot.profileMetadata)) {
+            for (const item of snapshot.profileMetadata) {
+              if (!item || typeof item !== "object") continue;
+              const row = item as Record<string, unknown>;
+              if (
+                typeof row.username !== "string" ||
+                typeof row.followersCount !== "number"
+              ) {
+                continue;
+              }
+              metadataRows.push({
+                username: row.username.toLowerCase(),
+                followersCount: row.followersCount,
+                dataSource:
+                  row.dataSource === "manual" ||
+                  row.dataSource === "android" ||
+                  row.dataSource === "meta_business_discovery"
+                    ? row.dataSource
+                    : "extension",
+                parserVersion:
+                  typeof row.parserVersion === "number"
+                    ? row.parserVersion
+                    : undefined,
+                updatedAt:
+                  typeof row.updatedAt === "string"
+                    ? row.updatedAt
+                    : new Date().toISOString(),
+              });
+            }
+          }
+
+          if (
+            snapshot.nativeResults &&
+            typeof snapshot.nativeResults === "object"
+          ) {
+            for (const value of Object.values(
+              snapshot.nativeResults as Record<string, unknown>,
+            )) {
+              if (!value || typeof value !== "object") continue;
+              const row = value as Record<string, unknown>;
+              if (
+                typeof row.username !== "string" ||
+                typeof row.followersCount !== "number"
+              ) {
+                continue;
+              }
+              metadataRows.push({
+                username: row.username.toLowerCase(),
+                followersCount: row.followersCount,
+                dataSource: "android",
+                updatedAt:
+                  typeof row.updatedAt === "string"
+                    ? row.updatedAt
+                    : new Date().toISOString(),
+              });
+            }
+          }
+
+          if (metadataRows.length) {
+            void upsertProfileMetadataBatch(metadataRows);
+            mergeMetadata(metadataRows);
+          }
+
+          const snapshotFailures: UnavailableProfile[] = [];
+          const collectFailure = (value: unknown) => {
+            if (!value || typeof value !== "object") return;
+            const row = value as Record<string, unknown>;
+            if (typeof row.username !== "string") return;
+            snapshotFailures.push({
+              username: row.username.toLowerCase(),
+              reason:
+                typeof row.reason === "string"
+                  ? row.reason
+                  : "unavailable",
+              updatedAt:
+                typeof row.updatedAt === "string"
+                  ? row.updatedAt
+                  : new Date().toISOString(),
+              source: "android",
+            });
+          };
+
+          if (Array.isArray(snapshot.failures)) {
+            snapshot.failures.forEach(collectFailure);
+          }
+          if (
+            snapshot.nativeFailures &&
+            typeof snapshot.nativeFailures === "object"
+          ) {
+            Object.values(
+              snapshot.nativeFailures as Record<string, unknown>,
+            ).forEach(collectFailure);
+          }
+
+          if (snapshotFailures.length) {
+            setExtensionFailures((current) => {
+              const map = new Map(
+                current.map((item) => [item.username, item] as const),
+              );
+              for (const item of snapshotFailures) {
+                map.set(item.username, item);
+              }
+              return Array.from(map.values());
+            });
+          }
         }
         return;
       }
@@ -581,6 +805,7 @@ export function CleanupManager() {
       setExtensionNote("Aplicativo Android detectado e pronto.");
       bridge.postMessage(JSON.stringify({ type: "PING" }));
       bridge.postMessage(JSON.stringify({ type: "GET_RESULTS" }));
+      bridge.postMessage(JSON.stringify({ type: "GET_SNAPSHOT" }));
     }
 
     return () => window.removeEventListener("message", handleMessage);
@@ -686,6 +911,23 @@ export function CleanupManager() {
     profileMetadata,
     protectedProfiles,
     settings,
+    extensionFailures,
+  ]);
+
+  useEffect(() => {
+    if (!androidReady || !latest) return;
+
+    const timer = window.setTimeout(() => {
+      saveProgressToAppMemory();
+    }, 1200);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    androidReady,
+    latest,
+    protectedProfiles,
+    settings,
+    profileMetadata,
     extensionFailures,
   ]);
 
@@ -798,14 +1040,34 @@ export function CleanupManager() {
     }).FollowCleanAndroid;
   }
 
+  function saveProgressToAppMemory() {
+    if (!androidReady || !latest || !androidBridge()?.postMessage) {
+      return false;
+    }
+
+    androidBridge()?.postMessage(
+      JSON.stringify({
+        type: "SAVE_SNAPSHOT",
+        snapshot: {
+          latest,
+          protectedProfiles,
+          settings,
+          profileMetadata,
+          failures: extensionFailures,
+        },
+      }),
+    );
+    return true;
+  }
+
   async function uploadLocalProgressToCloud() {
     if (!cloudConfigured) {
       setCloudNote("A nuvem ainda não está disponível nesta sessão.");
-      return;
+      return false;
     }
     if (!latest) {
       setCloudNote("Não há análise local neste dispositivo para enviar.");
-      return;
+      return false;
     }
 
     try {
@@ -826,7 +1088,7 @@ export function CleanupManager() {
 
       if (!response.ok) {
         setCloudNote("Não foi possível enviar o progresso local para a nuvem.");
-        return;
+        return false;
       }
 
       const payload = await response.json();
@@ -843,8 +1105,13 @@ export function CleanupManager() {
       setCloudNote(
         "Progresso deste dispositivo enviado para a nuvem com sucesso.",
       );
+      if (androidReady && androidBridge()?.postMessage) {
+        androidBridge()?.postMessage(JSON.stringify({ type: "CLOUD_SYNCED" }));
+      }
+      return true;
     } catch {
       setCloudNote("Falha temporária ao enviar o progresso para a nuvem.");
+      return false;
     }
   }
 
@@ -1017,15 +1284,46 @@ export function CleanupManager() {
     }
   }
 
-  function syncExtensionResults() {
-    if (cloudConfigured) void syncCloudState();
-    if (androidReady && androidBridge()?.postMessage) {
-      androidBridge()?.postMessage(JSON.stringify({ type: "GET_RESULTS" }));
-    } else {
-      window.postMessage(
-        { source: "followclean-web", type: "GET_RESULTS" },
-        "*",
-      );
+  async function syncExtensionResults() {
+    if (syncBusy) return;
+    setSyncBusy(true);
+    setExtensionNote("Sincronizando progresso...");
+
+    try {
+      if (androidReady && androidBridge()?.postMessage) {
+        saveProgressToAppMemory();
+        androidBridge()?.postMessage(JSON.stringify({ type: "GET_RESULTS" }));
+        setExtensionNote("Progresso salvo no aplicativo. Sincronizando com a nuvem...");
+      } else {
+        window.postMessage(
+          { source: "followclean-web", type: "GET_RESULTS" },
+          "*",
+        );
+      }
+
+      if (cloudConfigured) {
+        const uploaded = await uploadLocalProgressToCloud();
+        if (uploaded) {
+          await syncCloudState();
+          setExtensionNote(
+            androidReady
+              ? "Sincronização concluída: aplicativo e nuvem atualizados."
+              : "Sincronização concluída com a nuvem.",
+          );
+        } else if (androidReady) {
+          setExtensionNote(
+            "Progresso salvo no aplicativo. A sincronização com a nuvem ficou pendente.",
+          );
+        }
+      } else if (androidReady) {
+        setExtensionNote(
+          "Progresso salvo no aplicativo. A nuvem não está disponível nesta sessão.",
+        );
+      } else {
+        setExtensionNote("Resultados locais atualizados.");
+      }
+    } finally {
+      setSyncBusy(false);
     }
   }
 
@@ -1098,18 +1396,25 @@ export function CleanupManager() {
               <button type="button" disabled={(!extensionReady && !androidReady) || review.length === 0 || batchRunning} onClick={startAutomaticVerification} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Iniciar verificação contínua</button>
               <button type="button" disabled={(!extensionReady && !androidReady) || !batchRunning} onClick={pauseAutomaticVerification} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800 disabled:cursor-not-allowed disabled:opacity-40">Pausar</button>
               {!androidReady ? <button type="button" disabled={!extensionReady || review.length === 0} onClick={sendQueueToExtension} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Só enviar fila</button> : null}
-              <button type="button" disabled={!extensionReady && !androidReady} onClick={syncExtensionResults} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Sincronizar</button>
+              <button type="button" disabled={syncBusy || (!extensionReady && !androidReady)} onClick={() => void syncExtensionResults()} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">{syncBusy ? "Sincronizando..." : "Sincronizar"}</button>
               {!androidReady ? <Link href="/extensao" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700">Instalar extensão</Link> : null}
             </div>
           </div>
           <div className={`rounded-2xl border p-4 text-sm ${androidReady ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-amber-200 bg-amber-50 text-amber-950"}`}>
             <div className="font-black">{androidReady ? "APK ativo" : "Modo celular no navegador"}</div>
             <p className="mt-1 leading-6">{androidReady ? "O APK pode visitar os perfis da fila em uma WebView isolada, ler a contagem pública e devolver os resultados automaticamente ao FollowClean." : "No Chrome Android comum, a automação não pode ler outras páginas. Use o APK do FollowClean ou informe a contagem manualmente."}</p>
+            {androidReady && appSnapshotSavedAt ? (
+              <p className="mt-2 text-xs font-black text-emerald-800">
+                Salvo no app: {new Date(appSnapshotSavedAt).toLocaleString("pt-BR")}
+                {appCloudPending ? " · nuvem pendente" : ""}
+              </p>
+            ) : null}
           </div>
           <div className={`rounded-2xl border p-4 text-sm ${cloudConfigured ? "border-blue-200 bg-blue-50 text-blue-950" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
             <div className="font-black">{cloudConfigured ? "Checkpoint em nuvem ativo" : "Checkpoint em nuvem"}</div>
             <p className="mt-1 leading-6">{cloudNote}</p>
             {cloudSummary ? <p className="mt-2 text-xs font-black">Pendentes: {cloudSummary.pending.toLocaleString("pt-BR")} · Verificados: {cloudSummary.verified.toLocaleString("pt-BR")} · Indisponíveis: {cloudSummary.unavailable.toLocaleString("pt-BR")}</p> : null}
+            {lastCloudSyncAt ? <p className="mt-1 text-xs font-bold text-blue-700">Última sincronização: {new Date(lastCloudSyncAt).toLocaleString("pt-BR")}</p> : null}
             {cloudConfigured ? (
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
