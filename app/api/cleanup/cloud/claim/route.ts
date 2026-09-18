@@ -33,6 +33,34 @@ export async function POST(request: NextRequest) {
     [identity.ownerId, deviceId, identity.username],
   );
 
+  const lockRows = await sql.query(
+    `
+      INSERT INTO followclean_run_lock
+        (owner_id, active_device_id, lease_until, updated_at)
+      VALUES ($1, $2, NOW() + INTERVAL '2 minutes', NOW())
+      ON CONFLICT (owner_id)
+      DO UPDATE SET
+        active_device_id = EXCLUDED.active_device_id,
+        lease_until = EXCLUDED.lease_until,
+        updated_at = NOW()
+      WHERE followclean_run_lock.active_device_id = EXCLUDED.active_device_id
+         OR followclean_run_lock.lease_until < NOW()
+      RETURNING active_device_id, lease_until
+    `,
+    [identity.ownerId, deviceId],
+  );
+
+  if (!lockRows.length) {
+    return NextResponse.json(
+      {
+        configured: true,
+        error: "another_device_active",
+        retryAfterSeconds: 120,
+      },
+      { status: 409 },
+    );
+  }
+
   const rows = await sql.query(
     `
       WITH candidate AS (
