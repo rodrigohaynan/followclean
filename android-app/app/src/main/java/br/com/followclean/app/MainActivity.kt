@@ -99,7 +99,13 @@ class MainActivity : Activity() {
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             javaScriptCanOpenWindowsAutomatically = true
             setSupportMultipleWindows(true)
-            userAgentString = "$userAgentString FollowCleanAndroid/0.2.2"
+            // O site possui um fluxo especial para navegadores Android comuns que
+            // força abertura no Chrome. No APK usamos UA de navegador desktop para
+            // receber o OAuth direto na própria WebView.
+            userAgentString =
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
+                "FollowCleanAndroid/0.2.3"
         }
 
         CookieManager.getInstance().apply {
@@ -486,7 +492,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.2.2")
+                .put("version", "0.2.3")
         )
     }
 
