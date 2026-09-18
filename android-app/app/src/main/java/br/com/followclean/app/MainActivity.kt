@@ -41,6 +41,7 @@ class MainActivity : Activity() {
     private var extractionAttempts = 0
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private var oauthRedeemAttempts = 0
+    private var oauthRedeemLastAt = 0L
 
     private val maxProfilesPerRun = 30
     private val betweenProfilesMs = 12_000L
@@ -120,7 +121,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.5"
+                "FollowCleanAndroid/0.3.6"
         }
 
         CookieManager.getInstance().apply {
@@ -420,6 +421,10 @@ class MainActivity : Activity() {
         if (!::mainWebView.isInitialized) return
         if (!prefs.getBoolean("oauth_pending", false)) return
 
+        val now = System.currentTimeMillis()
+        if (now - oauthRedeemLastAt < 1_500L) return
+        oauthRedeemLastAt = now
+
         if (oauthRedeemAttempts >= 8) {
             updateStatus(
                 "A autorização ainda não chegou ao aplicativo. Volte ao navegador e confirme se o Instagram foi autorizado."
@@ -650,7 +655,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.5")
+                .put("version", "0.3.6")
         )
     }
 
