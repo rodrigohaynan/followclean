@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createStoredAndroidOAuthState } from "@/lib/instagram/android-oauth-state-store";
 import { createAndroidOAuthState } from "@/lib/instagram/oauth-state";
 
 function buildAuthUrl(appId: string, redirectUri: string, state: string) {
@@ -23,21 +22,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/conectar?status=setup", request.url));
   }
 
-  try {
-    const redirectUri =
-      process.env.INSTAGRAM_REDIRECT_URI ??
-      `${request.nextUrl.origin}/api/instagram/callback`;
-    const deviceKey = request.nextUrl.searchParams.get("deviceKey")?.trim() ?? "";
-    const state =
-      deviceKey.length >= 16
-        ? await createStoredAndroidOAuthState(deviceKey)
-        : createAndroidOAuthState();
+  const redirectUri =
+    process.env.INSTAGRAM_REDIRECT_URI ??
+    `${request.nextUrl.origin}/api/instagram/callback`;
 
-    return NextResponse.redirect(buildAuthUrl(appId, redirectUri, state));
-  } catch (error) {
-    console.error("[Instagram OAuth] android_state_store_error", error);
-    return NextResponse.redirect(
-      new URL("/conectar?status=android_state_error", request.url),
-    );
-  }
+  // O fluxo do APK usa um state assinado e autocontido.
+  // Assim o início do OAuth não depende de cookie nem de banco externo.
+  const state = createAndroidOAuthState();
+
+  return NextResponse.redirect(buildAuthUrl(appId, redirectUri, state));
 }
