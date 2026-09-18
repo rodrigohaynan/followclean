@@ -126,7 +126,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.12"
+                "FollowCleanAndroid/0.3.13"
         }
 
         CookieManager.getInstance().apply {
@@ -814,7 +814,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.12")
+                .put("version", "0.3.13")
                 .put("snapshotSavedAt", prefs.getString("app_snapshot_saved_at", null))
                 .put("cloudSyncPending", prefs.getBoolean("cloud_sync_pending", false))
                 .put("lastCloudSyncAt", prefs.getString("last_cloud_sync_at", null))
