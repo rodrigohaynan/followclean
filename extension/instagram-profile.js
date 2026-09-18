@@ -1,4 +1,5 @@
 (() => {
+  const PARSER_VERSION = 2;
   const RESERVED = new Set([
     "accounts",
     "direct",
@@ -13,6 +14,7 @@
   ]);
 
   let lastSavedSignature = "";
+  let lastUnavailableSignature = "";
 
   function currentUsername() {
     const segment = location.pathname.split("/").filter(Boolean)[0];
@@ -22,47 +24,66 @@
     return normalized;
   }
 
-  function parseHumanCount(raw) {
-    if (!raw) return null;
-    const text = String(raw)
+  function normalizedText(value) {
+    return String(value || "")
       .trim()
       .toLowerCase()
       .replace(/\u00a0/g, " ")
       .replace(/\s+/g, " ");
+  }
 
-    let multiplier = 1;
-    if (/\b(k|mil|thousand)\b/.test(text)) multiplier = 1_000;
-    if (/\b(m|mi|million|millions|milhão|milhoes|milhões)\b/.test(text)) {
-      multiplier = 1_000_000;
+  function hasScaleUnit(raw) {
+    const text = normalizedText(raw);
+    return /(?:^|\s|\d)(?:k|mil|milhao|milhão|milhoes|milhões|m|mi|million|millions|b|bilhao|bilhão|bilhoes|bilhões|billion|billions|thousand)(?:\s|$|\b)/i.test(text);
+  }
+
+  function detectMultiplier(raw) {
+    const text = normalizedText(raw);
+
+    if (/(?:\b|\d)(b|bilhao|bilhão|bilhoes|bilhões|billion|billions)\b/i.test(text)) {
+      return 1_000_000_000;
     }
-    if (/\b(b|billion|billions|bilhão|bilhoes|bilhões)\b/.test(text)) {
-      multiplier = 1_000_000_000;
+    if (/(?:\b|\d)(m|mi|milhao|milhão|milhoes|milhões|million|millions)\b/i.test(text)) {
+      return 1_000_000;
+    }
+    if (/(?:\b|\d)(k|mil|thousand)\b/i.test(text)) {
+      return 1_000;
+    }
+    return 1;
+  }
+
+  function parseScaledNumber(token, multiplier) {
+    let normalized = token.replace(/\s/g, "");
+
+    if (multiplier === 1) {
+      const digits = normalized.replace(/\D/g, "");
+      if (!digits) return null;
+      const value = Number.parseInt(digits, 10);
+      return Number.isFinite(value) ? value : null;
     }
 
+    if (normalized.includes(",") && normalized.includes(".")) {
+      const lastComma = normalized.lastIndexOf(",");
+      const lastDot = normalized.lastIndexOf(".");
+      const decimal = lastComma > lastDot ? "," : ".";
+      normalized = normalized
+        .replace(decimal === "," ? /\./g : /,/g, "")
+        .replace(decimal, ".");
+    } else if (normalized.includes(",")) {
+      normalized = normalized.replace(",", ".");
+    }
+
+    const value = Number.parseFloat(normalized);
+    return Number.isFinite(value) ? Math.round(value * multiplier) : null;
+  }
+
+  function parseHumanCount(raw) {
+    if (!raw) return null;
+    const text = normalizedText(raw);
     const token = text.match(/[\d.,]+/)?.[0];
     if (!token) return null;
 
-    if (multiplier > 1) {
-      let normalized = token;
-      if (normalized.includes(",") && normalized.includes(".")) {
-        const lastComma = normalized.lastIndexOf(",");
-        const lastDot = normalized.lastIndexOf(".");
-        const decimal = lastComma > lastDot ? "," : ".";
-        normalized = normalized
-          .replace(decimal === "," ? /\./g : /,/g, "")
-          .replace(decimal, ".");
-      } else if (normalized.includes(",")) {
-        normalized = normalized.replace(",", ".");
-      }
-
-      const value = Number.parseFloat(normalized);
-      return Number.isFinite(value) ? Math.round(value * multiplier) : null;
-    }
-
-    const digits = token.replace(/\D/g, "");
-    if (!digits) return null;
-    const value = Number.parseInt(digits, 10);
-    return Number.isFinite(value) ? value : null;
+    return parseScaledNumber(token, detectMultiplier(text));
   }
 
   function fromMetaDescription() {
@@ -72,8 +93,9 @@
     const content = meta?.getAttribute("content") || "";
 
     const match = content.match(
-      /([\d.,]+(?:\s*(?:k|m|b|mil|mi|thousand|million|millions|milhão|milhoes|milhões))?)\s+(?:followers|seguidores)/i
+      /([\d.,]+(?:\s*(?:k|m|b|mil|mi|milhao|milhão|milhoes|milhões|thousand|million|millions|billion|billions|bilhao|bilhão|bilhoes|bilhões))?)\s+(?:followers|seguidores)/i
     );
+
     return match ? parseHumanCount(match[1]) : null;
   }
 
@@ -87,13 +109,22 @@
     for (const link of followerLinks) {
       const title =
         link.querySelector("[title]")?.getAttribute("title") ||
-        link.getAttribute("title");
-      const exact = parseHumanCount(title);
-      if (typeof exact === "number") return exact;
-
+        link.getAttribute("title") ||
+        "";
       const text = link.textContent || "";
-      const parsed = parseHumanCount(text);
-      if (typeof parsed === "number") return parsed;
+
+      const parsedTitle = parseHumanCount(title);
+      const parsedText = parseHumanCount(text);
+
+      // Alguns layouts do Instagram retornam title="22" enquanto o texto
+      // visível mostra "22 mil". Quando houver uma unidade abreviada ou por
+      // extenso no texto visível, ela sempre tem prioridade sobre o title.
+      if (hasScaleUnit(text) && typeof parsedText === "number") {
+        return parsedText;
+      }
+
+      if (typeof parsedTitle === "number") return parsedTitle;
+      if (typeof parsedText === "number") return parsedText;
     }
 
     const candidates = [...document.querySelectorAll("header li, header span")];
@@ -105,6 +136,50 @@
     }
 
     return null;
+  }
+
+  function detectUnavailableReason() {
+    const username = currentUsername();
+    if (username?.startsWith("__deleted__")) return "deleted_username";
+
+    const text = normalizedText(
+      [document.title, document.body?.innerText || ""].join(" ")
+    );
+
+    const unavailablePhrases = [
+      "sorry, this page isn't available",
+      "page isn't available",
+      "the link you followed may be broken",
+      "esta página não está disponível",
+      "esta pagina nao esta disponivel",
+      "página não disponível",
+      "pagina nao disponivel",
+      "o link que você seguiu pode estar quebrado",
+      "o link que voce seguiu pode estar quebrado",
+      "user not found",
+      "usuário não encontrado",
+      "usuario nao encontrado"
+    ];
+
+    if (unavailablePhrases.some((phrase) => text.includes(phrase))) {
+      return "unavailable";
+    }
+
+    return null;
+  }
+
+  async function reportUnavailable(username, reason) {
+    const signature = `${username}:${reason}`;
+    if (signature === lastUnavailableSignature) return;
+    lastUnavailableSignature = signature;
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: "FOLLOWCLEAN_PROFILE_UNAVAILABLE",
+        username,
+        reason
+      });
+    } catch {}
   }
 
   async function capture() {
@@ -122,12 +197,18 @@
     const username = currentUsername();
     if (!username) return;
 
+    const unavailableReason = detectUnavailableReason();
+    if (unavailableReason) {
+      await reportUnavailable(username, unavailableReason);
+      return;
+    }
+
     const followersCount =
       fromMetaDescription() ?? fromVisibleProfileHeader();
 
     if (typeof followersCount !== "number") return;
 
-    const signature = `${username}:${followersCount}`;
+    const signature = `${username}:${followersCount}:v${PARSER_VERSION}`;
     if (signature === lastSavedSignature) return;
     lastSavedSignature = signature;
 
@@ -136,6 +217,7 @@
     results[username] = {
       username,
       followersCount,
+      parserVersion: PARSER_VERSION,
       dataSource: "extension",
       updatedAt: new Date().toISOString(),
       profileUrl: location.href
@@ -147,7 +229,8 @@
       await chrome.runtime.sendMessage({
         type: "FOLLOWCLEAN_PROFILE_CAPTURED",
         username,
-        followersCount
+        followersCount,
+        parserVersion: PARSER_VERSION
       });
     } catch {}
   }
@@ -155,6 +238,7 @@
   capture();
   setTimeout(capture, 1500);
   setTimeout(capture, 4000);
+  setTimeout(capture, 7000);
 
   const observer = new MutationObserver(() => {
     clearTimeout(window.__followcleanCaptureTimer);
