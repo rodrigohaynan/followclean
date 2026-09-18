@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sealInstagramSession } from "@/lib/instagram/session";
+import { verifyAndroidOAuthState } from "@/lib/instagram/oauth-state";
+import { sealAndroidHandoff } from "@/lib/instagram/android-handoff";
 
 const OAUTH_STATE_COOKIE = "followclean_ig_oauth_state";
 const SESSION_COOKIE = "followclean_ig_session";
@@ -45,9 +47,14 @@ export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
   const expectedState = request.cookies.get(OAUTH_STATE_COOKIE)?.value;
+  const isAndroidFlow = verifyAndroidOAuthState(state);
 
   if (!appId || !appSecret) return redirectWithStatus(request, "setup");
-  if (!code || !state || !expectedState || state !== expectedState) {
+  if (
+    !code ||
+    !state ||
+    (!isAndroidFlow && (!expectedState || state !== expectedState))
+  ) {
     return redirectWithStatus(request, "state_error");
   }
 
@@ -147,21 +154,34 @@ export async function GET(request: NextRequest) {
     }
 
     const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+    const session = {
+      accessToken,
+      expiresAt,
+      account: {
+        id: String(profile.user_id ?? profile.id ?? shortToken.user_id ?? ""),
+        username: profile.username,
+        accountType: profile.account_type,
+        profilePictureUrl: profile.profile_picture_url,
+        followersCount: profile.followers_count,
+        followsCount: profile.follows_count,
+      },
+    };
+
+    if (isAndroidFlow) {
+      try {
+        const handoff = sealAndroidHandoff(session);
+        const returnUrl = new URL("/conectar/android-retorno", request.url);
+        returnUrl.searchParams.set("handoff", handoff);
+        return NextResponse.redirect(returnUrl);
+      } catch (error) {
+        console.error("[Instagram OAuth] android_handoff_error", error);
+        return redirectWithStatus(request, "session_error");
+      }
+    }
 
     let sealed: string;
     try {
-      sealed = await sealInstagramSession({
-        accessToken,
-        expiresAt,
-        account: {
-          id: String(profile.user_id ?? profile.id ?? shortToken.user_id ?? ""),
-          username: profile.username,
-          accountType: profile.account_type,
-          profilePictureUrl: profile.profile_picture_url,
-          followersCount: profile.followers_count,
-          followsCount: profile.follows_count,
-        },
-      });
+      sealed = await sealInstagramSession(session);
     } catch (error) {
       console.error("[Instagram OAuth] session_error", error);
       const response = redirectWithStatus(request, "session_error");
