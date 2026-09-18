@@ -6,6 +6,7 @@ import {
   consumeStoredAndroidOAuthState,
   isStoredAndroidOAuthState,
 } from "@/lib/instagram/android-oauth-state-store";
+import { savePendingAndroidSession } from "@/lib/instagram/android-pending-session";
 
 const OAUTH_STATE_COOKIE = "followclean_ig_oauth_state";
 const SESSION_COOKIE = "followclean_ig_session";
@@ -58,10 +59,12 @@ export async function GET(request: NextRequest) {
   }
 
   let isAndroidFlow = verifyAndroidOAuthState(state);
+  let androidStateRecord: { deviceKeyHash: string } | null = null;
 
   if (!isAndroidFlow && isStoredAndroidOAuthState(state)) {
     try {
-      isAndroidFlow = await consumeStoredAndroidOAuthState(state);
+      androidStateRecord = await consumeStoredAndroidOAuthState(state);
+      isAndroidFlow = Boolean(androidStateRecord);
     } catch (error) {
       console.error("[Instagram OAuth] android_state_lookup_error", error);
       return redirectWithStatus(request, "android_state_error");
@@ -184,6 +187,17 @@ export async function GET(request: NextRequest) {
     if (isAndroidFlow) {
       try {
         const handoff = sealAndroidHandoff(session);
+
+        if (androidStateRecord?.deviceKeyHash) {
+          await savePendingAndroidSession(
+            androidStateRecord.deviceKeyHash,
+            handoff,
+          );
+          return NextResponse.redirect(
+            new URL("/conectar/android-retorno?stored=1", request.url),
+          );
+        }
+
         const returnUrl = new URL("/conectar/android-retorno", request.url);
         returnUrl.searchParams.set("handoff", handoff);
         return NextResponse.redirect(returnUrl);
