@@ -94,6 +94,24 @@ export async function ensureCloudSchema() {
     `;
 
     await sql`
+      CREATE TABLE IF NOT EXISTS followclean_cleanup_snapshot (
+        owner_id TEXT PRIMARY KEY,
+        owner_username TEXT,
+        analysis JSONB NOT NULL,
+        source_file TEXT,
+        analysis_created_at TIMESTAMPTZ,
+        protected_profiles JSONB NOT NULL DEFAULT '[]'::jsonb,
+        settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+
+    await sql`
+      CREATE INDEX IF NOT EXISTS followclean_cleanup_snapshot_updated_idx
+      ON followclean_cleanup_snapshot (updated_at DESC)
+    `;
+
+    await sql`
       CREATE TABLE IF NOT EXISTS followclean_run_lock (
         owner_id TEXT PRIMARY KEY,
         active_device_id TEXT NOT NULL,
