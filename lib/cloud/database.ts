@@ -1,8 +1,13 @@
 import { neon } from "@neondatabase/serverless";
 
-type QueryResult = Record<string, unknown>[];
+export type QueryRow = Record<string, unknown>;
+export type QueryResult = QueryRow[];
 
-type CloudSql = ReturnType<typeof neon> & {
+export type CloudSql = {
+  (
+    strings: TemplateStringsArray,
+    ...params: unknown[]
+  ): Promise<QueryResult>;
   query: (text: string, params?: unknown[]) => Promise<QueryResult>;
 };
 
@@ -27,14 +32,23 @@ export function getCloudSql(): CloudSql {
     throw new Error("FOLLOWCLEAN_DATABASE_URL não configurada.");
   }
 
-  const sql = neon(url) as CloudSql;
-  sql.query = async (text: string, params: unknown[] = []) => {
-    const rows = await neon(url).query(text, params);
+  const base = neon(url);
+
+  const tagged = (async (
+    strings: TemplateStringsArray,
+    ...params: unknown[]
+  ) => {
+    const rows = await base(strings, ...params);
+    return rows as QueryResult;
+  }) as CloudSql;
+
+  tagged.query = async (text: string, params: unknown[] = []) => {
+    const rows = await base.query(text, params);
     return rows as QueryResult;
   };
 
-  sqlClient = sql;
-  return sqlClient;
+  sqlClient = tagged;
+  return tagged;
 }
 
 export async function ensureCloudSchema() {
