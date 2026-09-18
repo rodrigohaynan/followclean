@@ -45,7 +45,7 @@ class MainActivity : Activity() {
 
     private val betweenProfilesMs = 12_000L
     private val extractionDelayMs = 2_500L
-    private val maxExtractionAttempts = 7
+    private val maxExtractionAttempts = 3
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -126,7 +126,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.10"
+                "FollowCleanAndroid/0.3.11"
         }
 
         CookieManager.getInstance().apply {
@@ -732,11 +732,6 @@ class MainActivity : Activity() {
             updateVerificationForeground(message)
             sendBatchStatus(message)
 
-            if (extractionAttempts == 3) {
-                scannerWebView.reload()
-                return
-            }
-
             val delay = 2_500L + (extractionAttempts * 2_000L)
             handler.postDelayed({ extractFollowers() }, delay)
             return
@@ -808,7 +803,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.10")
+                .put("version", "0.3.11")
         )
     }
 
