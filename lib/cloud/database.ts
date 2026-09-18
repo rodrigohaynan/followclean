@@ -50,6 +50,19 @@ export async function ensureCloudSchema() {
     `;
 
     await sql`
+      CREATE TABLE IF NOT EXISTS followclean_android_oauth_states (
+        state_hash TEXT PRIMARY KEY,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+
+    await sql`
+      CREATE INDEX IF NOT EXISTS followclean_android_oauth_states_expires_idx
+      ON followclean_android_oauth_states (expires_at)
+    `;
+
+    await sql`
       CREATE TABLE IF NOT EXISTS followclean_devices (
         owner_id TEXT NOT NULL,
         device_id TEXT NOT NULL,
