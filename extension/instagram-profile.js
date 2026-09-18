@@ -108,6 +108,17 @@
   }
 
   async function capture() {
+    if (
+      location.pathname.startsWith("/accounts/") ||
+      location.pathname.startsWith("/challenge/") ||
+      location.pathname.startsWith("/checkpoint/")
+    ) {
+      try {
+        await chrome.runtime.sendMessage({ type: "FOLLOWCLEAN_BLOCKED" });
+      } catch {}
+      return;
+    }
+
     const username = currentUsername();
     if (!username) return;
 
@@ -131,6 +142,14 @@
     };
 
     await chrome.storage.local.set({ followcleanResults: results });
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: "FOLLOWCLEAN_PROFILE_CAPTURED",
+        username,
+        followersCount
+      });
+    } catch {}
   }
 
   capture();
