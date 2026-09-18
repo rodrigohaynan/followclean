@@ -27,7 +27,7 @@ export async function savePendingAndroidSession(
   `;
 }
 
-export async function consumePendingAndroidSession(
+export async function readPendingAndroidSession(
   deviceKey: string,
 ): Promise<InstagramSession | null> {
   const normalized = deviceKey.trim();
@@ -38,10 +38,11 @@ export async function consumePendingAndroidSession(
   const deviceKeyHash = hashAndroidDeviceKey(normalized);
 
   const rows = await sql`
-    DELETE FROM followclean_android_pending_sessions
+    SELECT handoff
+    FROM followclean_android_pending_sessions
     WHERE device_key_hash = ${deviceKeyHash}
       AND expires_at > NOW()
-    RETURNING handoff
+    LIMIT 1
   `;
 
   const handoff = rows[0]?.handoff;
