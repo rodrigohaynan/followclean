@@ -16,7 +16,7 @@ const statusMessages: Record<string, { tone: string; text: string }> = {
   connected: { tone: "border-emerald-200 bg-emerald-50 text-emerald-900", text: "Conta do Instagram conectada com sucesso." },
   disconnected: { tone: "border-slate-200 bg-slate-50 text-slate-700", text: "Conta desconectada deste dispositivo." },
   setup: { tone: "border-amber-200 bg-amber-50 text-amber-900", text: "A integração está pronta no código, mas ainda faltam o App ID e o App Secret da Meta." },
-  state_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "A validação de segurança do login expirou. Tente conectar novamente." },
+  state_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "A validação de segurança não corresponde à tentativa atual. Inicie a conexão novamente nesta mesma aba." },
   error: { tone: "border-red-200 bg-red-50 text-red-900", text: "A Meta não concluiu a conexão. Verifique a configuração do app e tente novamente." },
   token_exchange_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "O Instagram autorizou o login, mas a Meta recusou a troca do código pelo token. Vamos revisar App ID, App Secret e Redirect URI." },
   invalid_platform_app: { tone: "border-red-200 bg-red-50 text-red-900", text: "A Meta informou “Invalid platform app”. O FollowClean provavelmente está usando o App ID geral do Facebook/Meta em vez do Instagram App ID da seção API setup with Instagram login." },
