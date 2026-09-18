@@ -91,6 +91,13 @@ async function markFailure(username, reason) {
   await chrome.storage.local.set({ followcleanFailures: state.failures });
 }
 
+async function clearFailure(username) {
+  const state = await getState();
+  if (!state.failures[username]) return;
+  delete state.failures[username];
+  await chrome.storage.local.set({ followcleanFailures: state.failures });
+}
+
 async function scheduleNext(delay = BETWEEN_PROFILES_MS) {
   clearTimers();
   timer = setTimeout(() => {
@@ -203,6 +210,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       clearTimeout(timeoutTimer);
       timeoutTimer = null;
 
+      await clearFailure(username);
       const state = await getState();
       if (!state.batch.running) return;
 
