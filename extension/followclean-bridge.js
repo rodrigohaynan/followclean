@@ -21,7 +21,8 @@
       "followcleanResults",
       "followcleanQueue",
       "followcleanQueueUpdatedAt",
-      "followcleanBatch"
+      "followcleanBatch",
+      "followcleanFailures"
     ]);
 
     const results = Object.values(stored.followcleanResults || {});
@@ -31,7 +32,8 @@
         ? stored.followcleanQueue.length
         : 0,
       queueUpdatedAt: stored.followcleanQueueUpdatedAt || null,
-      batch: stored.followcleanBatch || null
+      batch: stored.followcleanBatch || null,
+      failures: Object.values(stored.followcleanFailures || {})
     });
   }
 
@@ -117,7 +119,8 @@
     if (
       changes.followcleanResults ||
       changes.followcleanBatch ||
-      changes.followcleanQueue
+      changes.followcleanQueue ||
+      changes.followcleanFailures
     ) {
       void sendResults();
     }
