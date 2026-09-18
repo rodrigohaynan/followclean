@@ -1,12 +1,26 @@
-const PROCESS_LIMIT = 50;
-const NAVIGATION_TIMEOUT_MS = 18000;
-const BETWEEN_PROFILES_MS = 10000;
+const NAVIGATION_TIMEOUT_MS = 25_000;
+const BETWEEN_PROFILES_MS = 35_000;
+const COOLDOWN_EVERY = 100;
+const COOLDOWN_MS = 5 * 60_000;
 
-let timer = null;
-let timeoutTimer = null;
+const NEXT_ALARM = "followclean-next";
+const TIMEOUT_ALARM = "followclean-timeout";
 
 function normalizeUsername(value) {
   return String(value || "").trim().toLowerCase().replace(/^@/, "");
+}
+
+async function ensureDeviceId() {
+  const stored = await chrome.storage.local.get(["followcleanDeviceId"]);
+  if (stored.followcleanDeviceId) return stored.followcleanDeviceId;
+
+  const deviceId =
+    typeof crypto?.randomUUID === "function"
+      ? crypto.randomUUID()
+      : "device-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+
+  await chrome.storage.local.set({ followcleanDeviceId: deviceId });
+  return deviceId;
 }
 
 async function getState() {
@@ -14,13 +28,19 @@ async function getState() {
     "followcleanQueue",
     "followcleanResults",
     "followcleanBatch",
-    "followcleanFailures"
+    "followcleanFailures",
+    "followcleanCloudAuth",
+    "followcleanDeviceId"
   ]);
 
   return {
-    queue: Array.isArray(stored.followcleanQueue) ? stored.followcleanQueue.map(normalizeUsername).filter(Boolean) : [],
+    queue: Array.isArray(stored.followcleanQueue)
+      ? stored.followcleanQueue.map(normalizeUsername).filter(Boolean)
+      : [],
     results: stored.followcleanResults || {},
     failures: stored.followcleanFailures || {},
+    cloudAuth: stored.followcleanCloudAuth || null,
+    deviceId: stored.followcleanDeviceId || (await ensureDeviceId()),
     batch: stored.followcleanBatch || {
       running: false,
       currentUsername: null,
@@ -34,29 +54,115 @@ async function getState() {
 
 async function saveBatch(patch) {
   const state = await getState();
-  const batch = { ...state.batch, ...patch, updatedAt: new Date().toISOString() };
+  const batch = {
+    ...state.batch,
+    ...patch,
+    updatedAt: new Date().toISOString()
+  };
   await chrome.storage.local.set({ followcleanBatch: batch });
   return batch;
 }
 
-function clearTimers() {
-  if (timer) clearTimeout(timer);
-  if (timeoutTimer) clearTimeout(timeoutTimer);
-  timer = null;
-  timeoutTimer = null;
+async function clearAlarms() {
+  await Promise.allSettled([
+    chrome.alarms.clear(NEXT_ALARM),
+    chrome.alarms.clear(TIMEOUT_ALARM)
+  ]);
 }
 
-async function nextPending() {
+async function scheduleNext(delay = BETWEEN_PROFILES_MS) {
+  await chrome.alarms.clear(NEXT_ALARM);
+  await chrome.alarms.create(NEXT_ALARM, { when: Date.now() + delay });
+}
+
+async function scheduleTimeout() {
+  await chrome.alarms.clear(TIMEOUT_ALARM);
+  await chrome.alarms.create(TIMEOUT_ALARM, {
+    when: Date.now() + NAVIGATION_TIMEOUT_MS
+  });
+}
+
+async function nextPendingLocal() {
   const { queue, results, failures } = await getState();
-  return queue.find((username) => {
-    const result = results[username];
-    const validResult = result && Number(result.parserVersion || 0) >= 2;
-    return !validResult && !failures[username];
-  }) || null;
+  return (
+    queue.find((username) => {
+      const result = results[username];
+      const validResult = result && Number(result.parserVersion || 0) >= 2;
+      return !validResult && !failures[username];
+    }) || null
+  );
+}
+
+async function cloudRequest(path, options = {}) {
+  const state = await getState();
+  const cloud = state.cloudAuth;
+
+  if (!cloud?.configured || !cloud?.token) {
+    return { enabled: false, ok: false, data: null };
+  }
+
+  try {
+    const response = await fetch(
+      "https://followclean.netlify.app" + path,
+      {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + cloud.token,
+          ...(options.headers || {})
+        }
+      }
+    );
+
+    const data = await response.json().catch(() => null);
+    return { enabled: true, ok: response.ok, data };
+  } catch {
+    return { enabled: true, ok: false, data: null };
+  }
+}
+
+async function claimNextCloud(deviceId) {
+  return cloudRequest("/api/cleanup/cloud/claim", {
+    method: "POST",
+    body: JSON.stringify({ deviceId })
+  });
+}
+
+async function reportCloudResult(payload) {
+  return cloudRequest("/api/cleanup/cloud/result", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+async function resolveNextUsername(state) {
+  if (state.cloudAuth?.configured && state.cloudAuth?.token) {
+    const claimed = await claimNextCloud(state.deviceId);
+
+    if (!claimed.ok) {
+      return {
+        mode: "cloud",
+        retry: true,
+        username: null
+      };
+    }
+
+    return {
+      mode: "cloud",
+      retry: false,
+      username: normalizeUsername(claimed.data?.item?.username || "")
+    };
+  }
+
+  return {
+    mode: "local",
+    retry: false,
+    username: await nextPendingLocal()
+  };
 }
 
 async function ensureWorkerTab(username, existingTabId) {
-  const url = `https://www.instagram.com/${encodeURIComponent(username)}/`;
+  const url = \`https://www.instagram.com/\${encodeURIComponent(username)}/\`;
 
   if (existingTabId) {
     try {
@@ -73,7 +179,7 @@ async function ensureWorkerTab(username, existingTabId) {
 }
 
 async function stopBatch(message = "Pausado") {
-  clearTimers();
+  await clearAlarms();
   await saveBatch({
     running: false,
     currentUsername: null,
@@ -98,25 +204,76 @@ async function clearFailure(username) {
   await chrome.storage.local.set({ followcleanFailures: state.failures });
 }
 
-async function scheduleNext(delay = BETWEEN_PROFILES_MS) {
-  clearTimers();
-  timer = setTimeout(() => {
-    void processNext();
-  }, delay);
+async function finishCurrentProfile({
+  username,
+  status,
+  followersCount = null,
+  parserVersion = null,
+  reason = null
+}) {
+  await chrome.alarms.clear(TIMEOUT_ALARM);
+
+  const state = await getState();
+  const processed = (state.batch.processedThisRun || 0) + 1;
+
+  if (state.cloudAuth?.configured && state.cloudAuth?.token) {
+    await reportCloudResult({
+      deviceId: state.deviceId,
+      username,
+      status,
+      followersCount,
+      parserVersion,
+      reason
+    });
+  }
+
+  await saveBatch({
+    processedThisRun: processed,
+    currentUsername: null,
+    lastMessage:
+      status === "verified"
+        ? \`@\${username}: \${Number(followersCount || 0).toLocaleString("pt-BR")} seguidores capturados.\`
+        : \`@\${username} está indisponível. Movido para a lista separada.\`
+  });
+
+  const cooldown =
+    processed > 0 && processed % COOLDOWN_EVERY === 0
+      ? COOLDOWN_MS
+      : BETWEEN_PROFILES_MS;
+
+  if (cooldown === COOLDOWN_MS) {
+    await saveBatch({
+      lastMessage:
+        \`\${processed.toLocaleString("pt-BR")} perfis verificados nesta sessão. \` +
+        "Pausa preventiva de 5 minutos antes de continuar."
+    });
+  }
+
+  await scheduleNext(cooldown);
 }
 
 async function processNext() {
   const state = await getState();
   if (!state.batch.running) return;
 
-  if ((state.batch.processedThisRun || 0) >= PROCESS_LIMIT) {
-    await stopBatch(`Lote concluído: ${PROCESS_LIMIT} perfis verificados. Inicie outro lote para continuar.`);
+  const next = await resolveNextUsername(state);
+
+  if (next.retry) {
+    await saveBatch({
+      lastMessage:
+        "Sincronização em nuvem indisponível no momento. Nova tentativa em 1 minuto."
+    });
+    await scheduleNext(60_000);
     return;
   }
 
-  const username = await nextPending();
+  const username = next.username;
   if (!username) {
-    await stopBatch("Fila concluída ou sem perfis pendentes.");
+    await stopBatch(
+      next.mode === "cloud"
+        ? "Fila em nuvem concluída ou sem perfis pendentes."
+        : "Fila concluída ou sem perfis pendentes."
+    );
     return;
   }
 
@@ -126,33 +283,41 @@ async function processNext() {
     running: true,
     currentUsername: username,
     tabId,
-    lastMessage: `Verificando @${username}...`
+    lastMessage:
+      \`Verificando @\${username} · \${(state.batch.processedThisRun || 0) + 1}º perfil desta sessão\`
   });
 
-  timeoutTimer = setTimeout(async () => {
-    const latest = await getState();
-    if (!latest.batch.running || latest.batch.currentUsername !== username) return;
+  await scheduleTimeout();
+}
 
-    await markFailure(username, "timeout");
-    await saveBatch({
-      processedThisRun: (latest.batch.processedThisRun || 0) + 1,
-      lastMessage: `Não foi possível ler @${username}. Seguindo para o próximo.`
-    });
-    await scheduleNext();
-  }, NAVIGATION_TIMEOUT_MS);
+async function handleTimeout() {
+  const state = await getState();
+  if (!state.batch.running || !state.batch.currentUsername) return;
+
+  const username = normalizeUsername(state.batch.currentUsername);
+  await markFailure(username, "timeout");
+
+  await finishCurrentProfile({
+    username,
+    status: "unavailable",
+    reason: "timeout"
+  });
 }
 
 async function startBatch() {
-  clearTimers();
-  const state = await getState();
+  await clearAlarms();
 
+  const state = await getState();
   await saveBatch({
     running: true,
     currentUsername: null,
     processedThisRun: 0,
     startedAt: new Date().toISOString(),
     tabId: state.batch.tabId || null,
-    lastMessage: `Lote iniciado. Máximo de ${PROCESS_LIMIT} perfis por execução.`
+    lastMessage:
+      state.cloudAuth?.configured
+        ? "Verificação contínua iniciada com checkpoint em nuvem."
+        : "Verificação contínua iniciada neste navegador."
   });
 
   await processNext();
@@ -167,12 +332,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "FOLLOWCLEAN_PAUSE_BATCH") {
-    void stopBatch("Pausado pelo usuário.").then(() => sendResponse({ ok: true }));
+    void stopBatch("Pausado pelo usuário. O progresso salvo será mantido.")
+      .then(() => sendResponse({ ok: true }));
     return true;
   }
 
   if (message.type === "FOLLOWCLEAN_GET_STATUS") {
-    void getState().then((state) => sendResponse({ ok: true, batch: state.batch }));
+    void getState().then((state) =>
+      sendResponse({
+        ok: true,
+        batch: state.batch,
+        cloudConfigured: Boolean(
+          state.cloudAuth?.configured && state.cloudAuth?.token
+        )
+      })
+    );
     return true;
   }
 
@@ -181,21 +355,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!username) return;
 
     void (async () => {
-      clearTimeout(timeoutTimer);
-      timeoutTimer = null;
-
       const state = await getState();
-      await markFailure(username, message.reason || "unavailable");
-
       if (!state.batch.running) return;
 
-      const processed = (state.batch.processedThisRun || 0) + 1;
-      await saveBatch({
-        processedThisRun: processed,
-        currentUsername: null,
-        lastMessage: `@${username} está indisponível. Movido para a lista separada.`
+      await markFailure(username, message.reason || "unavailable");
+      await finishCurrentProfile({
+        username,
+        status: "unavailable",
+        reason: message.reason || "unavailable"
       });
-      await scheduleNext();
     })();
 
     sendResponse({ ok: true });
@@ -207,20 +375,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!username) return;
 
     void (async () => {
-      clearTimeout(timeoutTimer);
-      timeoutTimer = null;
-
-      await clearFailure(username);
       const state = await getState();
       if (!state.batch.running) return;
 
-      const processed = (state.batch.processedThisRun || 0) + 1;
-      await saveBatch({
-        processedThisRun: processed,
-        currentUsername: null,
-        lastMessage: `@${username}: ${Number(message.followersCount || 0).toLocaleString("pt-BR")} seguidores capturados.`
+      await clearFailure(username);
+      await finishCurrentProfile({
+        username,
+        status: "verified",
+        followersCount: Number(message.followersCount || 0),
+        parserVersion: Number(message.parserVersion || 2)
       });
-      await scheduleNext();
     })();
 
     sendResponse({ ok: true });
@@ -229,17 +393,56 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "FOLLOWCLEAN_BLOCKED") {
     void stopBatch(
-      "O Instagram exibiu uma tela de login, verificação ou bloqueio. A fila foi pausada para não insistir."
+      "O Instagram exibiu login, verificação ou bloqueio. A verificação foi pausada automaticamente."
     ).then(() => sendResponse({ ok: true }));
     return true;
   }
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === NEXT_ALARM) {
+    void processNext();
+  } else if (alarm.name === TIMEOUT_ALARM) {
+    void handleTimeout();
+  }
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  void (async () => {
+    const state = await getState();
+    if (state.batch.running) {
+      await saveBatch({
+        lastMessage: "Chrome reiniciado. Retomando a fila salva..."
+      });
+      await scheduleNext(2_000);
+    }
+  })();
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  void ensureDeviceId();
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   void (async () => {
     const state = await getState();
     if (state.batch.tabId === tabId && state.batch.running) {
-      await stopBatch("A aba de verificação foi fechada. Lote pausado.");
+      await stopBatch(
+        "A aba de verificação foi fechada. O progresso foi salvo e a execução foi pausada."
+      );
     }
   })();
 });
+
+void (async () => {
+  const state = await getState();
+  if (state.batch.running) {
+    const alarms = await chrome.alarms.getAll();
+    const hasNext = alarms.some((alarm) => alarm.name === NEXT_ALARM);
+    const hasTimeout = alarms.some((alarm) => alarm.name === TIMEOUT_ALARM);
+
+    if (!hasNext && !hasTimeout) {
+      await scheduleNext(2_000);
+    }
+  }
+})();
