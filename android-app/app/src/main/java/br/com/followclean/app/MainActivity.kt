@@ -97,7 +97,9 @@ class MainActivity : Activity() {
             domStorageEnabled = true
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            userAgentString = "$userAgentString FollowCleanAndroid/0.2.1"
+            javaScriptCanOpenWindowsAutomatically = true
+            setSupportMultipleWindows(true)
+            userAgentString = "$userAgentString FollowCleanAndroid/0.2.2"
         }
 
         CookieManager.getInstance().apply {
@@ -106,6 +108,52 @@ class MainActivity : Activity() {
         }
 
         mainWebView.webChromeClient = object : WebChromeClient() {
+            override fun onCreateWindow(
+                view: WebView,
+                isDialog: Boolean,
+                isUserGesture: Boolean,
+                resultMsg: android.os.Message
+            ): Boolean {
+                val popup = WebView(this@MainActivity).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.javaScriptCanOpenWindowsAutomatically = true
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            popupView: WebView,
+                            request: WebResourceRequest
+                        ): Boolean {
+                            handleMainNavigation(mainWebView, request.url.toString())
+                            popupView.destroy()
+                            return true
+                        }
+
+                        @Deprecated("Legacy WebView callback")
+                        override fun shouldOverrideUrlLoading(
+                            popupView: WebView,
+                            url: String
+                        ): Boolean {
+                            handleMainNavigation(mainWebView, url)
+                            popupView.destroy()
+                            return true
+                        }
+
+                        override fun onPageFinished(popupView: WebView, url: String) {
+                            super.onPageFinished(popupView, url)
+                            if (url.isNotBlank() && url != "about:blank") {
+                                handleMainNavigation(mainWebView, url)
+                                popupView.destroy()
+                            }
+                        }
+                    }
+                }
+
+                val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+                transport.webView = popup
+                resultMsg.sendToTarget()
+                return true
+            }
+
             override fun onShowFileChooser(
                 webView: WebView,
                 filePathCallback: ValueCallback<Array<Uri>>,
@@ -148,6 +196,11 @@ class MainActivity : Activity() {
                 request: WebResourceRequest
             ): Boolean {
                 return handleMainNavigation(view, request.url.toString())
+            }
+
+            @Deprecated("Legacy WebView callback")
+            override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                return handleMainNavigation(view, url)
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -202,9 +255,10 @@ class MainActivity : Activity() {
         val host = uri.host.orEmpty().lowercase()
         val allowedHost =
             host == "followclean.netlify.app" ||
-            host == "www.instagram.com" ||
             host == "instagram.com" ||
-            host == "api.instagram.com"
+            host.endsWith(".instagram.com") ||
+            host == "facebook.com" ||
+            host.endsWith(".facebook.com")
 
         if ((scheme == "https" || scheme == "http") && allowedHost) {
             return false
@@ -212,6 +266,17 @@ class MainActivity : Activity() {
 
         if (scheme == "about" || scheme == "data" || scheme == "blob") {
             return false
+        }
+
+        // Durante o OAuth não entregamos a navegação a outro app/navegador,
+        // porque isso separa os cookies da WebView e quebra a validação de state.
+        if (
+            rawUrl.contains("instagram", ignoreCase = true) ||
+            rawUrl.contains("facebook", ignoreCase = true) ||
+            rawUrl.contains("oauth", ignoreCase = true)
+        ) {
+            updateStatus("Mantendo a autorização dentro do FollowClean...")
+            return true
         }
 
         runCatching {
@@ -421,7 +486,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.2.1")
+                .put("version", "0.2.2")
         )
     }
 
