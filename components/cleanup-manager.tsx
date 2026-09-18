@@ -77,6 +77,9 @@ function unavailableReasonLabel(reason: string) {
   if (reason === "timeout") {
     return "Perfil não abriu ou não pôde ser lido";
   }
+  if (reason === "no_response" || reason === "unreadable") {
+    return "Sem resposta utilizável no endereço do perfil";
+  }
   return "Perfil indisponível, removido ou possivelmente bloqueou você";
 }
 
