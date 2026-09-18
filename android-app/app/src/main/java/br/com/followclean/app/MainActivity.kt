@@ -42,10 +42,9 @@ class MainActivity : Activity() {
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private var oauthRedeemAttempts = 0
 
-    private val maxProfilesPerRun = 30
     private val betweenProfilesMs = 12_000L
-    private val extractionDelayMs = 2_000L
-    private val secondExtractionDelayMs = 3_000L
+    private val extractionDelayMs = 2_500L
+    private val maxExtractionAttempts = 5
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -126,7 +125,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.7"
+                "FollowCleanAndroid/0.3.8"
         }
 
         CookieManager.getInstance().apply {
@@ -514,7 +513,7 @@ class MainActivity : Activity() {
         running = true
         currentUsername = null
         persistState()
-        sendBatchStatus("Verificação iniciada. Até $maxProfilesPerRun perfis por lote.")
+        sendBatchStatus("Verificação contínua iniciada. ${queue.size} perfis na fila.")
         processNext()
     }
 
@@ -531,11 +530,6 @@ class MainActivity : Activity() {
     private fun processNext() {
         if (!running) return
 
-        if (processedThisRun >= maxProfilesPerRun) {
-            pauseBatch("Lote concluído: $processedThisRun perfis verificados.")
-            return
-        }
-
         val results = readResults()
         while (currentIndex < queue.size && results.has(queue[currentIndex])) {
             currentIndex++
@@ -550,7 +544,7 @@ class MainActivity : Activity() {
         val username = currentUsername ?: return
         persistState()
 
-        val message = "Verificando @$username · ${processedThisRun + 1}/$maxProfilesPerRun"
+        val message = "Verificando @$username · ${processedThisRun + 1}/${queue.size}"
         updateStatus(message)
         sendBatchStatus(message)
 
@@ -571,24 +565,47 @@ class MainActivity : Activity() {
             }
 
             if (json.optBoolean("blocked", false)) {
-                pauseBatch("Instagram exibiu login/verificação. Lote pausado.")
+                pauseBatch("Instagram exibiu login/verificação. Verificação pausada.")
                 return@evaluateJavascript
             }
 
             val username = json.optString("username").lowercase()
+            val unavailable = json.optBoolean("unavailable", false)
             val followersCount =
                 if (json.has("followersCount") && !json.isNull("followersCount")) {
-                    json.optInt("followersCount", -1)
+                    json.optLong("followersCount", -1L)
                 } else {
-                    -1
+                    -1L
                 }
 
-            if (username != expected.lowercase() || followersCount < 0) {
+            if (username != expected.lowercase()) {
+                retryOrSkip(expected)
+                return@evaluateJavascript
+            }
+
+            if (unavailable) {
+                saveFailure(username, "unavailable")
+                processedThisRun++
+                currentIndex++
+                currentUsername = null
+                persistState()
+
+                val message = "@$username indisponível. Movido para Indisponíveis."
+                updateStatus(message)
+                sendUnavailableToWeb(username, "unavailable")
+                sendResultsToWeb()
+                sendBatchStatus(message)
+                handler.postDelayed({ processNext() }, betweenProfilesMs)
+                return@evaluateJavascript
+            }
+
+            if (followersCount < 0L) {
                 retryOrSkip(expected)
                 return@evaluateJavascript
             }
 
             saveResult(username, followersCount)
+            clearFailure(username)
             processedThisRun++
             currentIndex++
             currentUsername = null
@@ -596,6 +613,7 @@ class MainActivity : Activity() {
 
             val message = "@$username: $followersCount seguidores"
             updateStatus(message)
+            sendProfileResultToWeb(username, followersCount)
             sendResultsToWeb()
             sendBatchStatus(message)
 
@@ -605,23 +623,32 @@ class MainActivity : Activity() {
 
     private fun retryOrSkip(username: String) {
         extractionAttempts++
-        if (extractionAttempts < 2) {
-            handler.postDelayed({ extractFollowers() }, secondExtractionDelayMs)
+        if (extractionAttempts < maxExtractionAttempts) {
+            val delay = 2_500L + (extractionAttempts * 2_000L)
+            val message =
+                "Aguardando @$username carregar · tentativa ${extractionAttempts + 1}/$maxExtractionAttempts"
+            updateStatus(message)
+            sendBatchStatus(message)
+            handler.postDelayed({ extractFollowers() }, delay)
             return
         }
 
+        saveFailure(username, "unreadable")
         processedThisRun++
         currentIndex++
         currentUsername = null
         persistState()
 
-        val message = "Não foi possível ler @$username. Seguindo."
+        val message =
+            "Não foi possível ler @$username após $maxExtractionAttempts tentativas. Movido para Indisponíveis."
         updateStatus(message)
+        sendUnavailableToWeb(username, "unreadable")
+        sendResultsToWeb()
         sendBatchStatus(message)
         handler.postDelayed({ processNext() }, betweenProfilesMs)
     }
 
-    private fun saveResult(username: String, followersCount: Int) {
+    private fun saveResult(username: String, followersCount: Long) {
         val results = readResults()
         results.put(
             username,
@@ -632,6 +659,32 @@ class MainActivity : Activity() {
                 .put("updatedAt", Instant.now().toString())
         )
         prefs.edit().putString("results", results.toString()).apply()
+    }
+
+    private fun saveFailure(username: String, reason: String) {
+        val failures = readFailures()
+        failures.put(
+            username,
+            JSONObject()
+                .put("username", username)
+                .put("reason", reason)
+                .put("updatedAt", Instant.now().toString())
+        )
+        prefs.edit().putString("failures", failures.toString()).apply()
+    }
+
+    private fun clearFailure(username: String) {
+        val failures = readFailures()
+        if (!failures.has(username)) return
+        failures.remove(username)
+        prefs.edit().putString("failures", failures.toString()).apply()
+    }
+
+    private fun readFailures(): JSONObject {
+        val raw = prefs.getString("failures", null)
+        return runCatching {
+            if (raw.isNullOrBlank()) JSONObject() else JSONObject(raw)
+        }.getOrDefault(JSONObject())
     }
 
     private fun readResults(): JSONObject {
@@ -646,17 +699,58 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.7")
+                .put("version", "0.3.8")
+        )
+    }
+
+    private fun sendProfileResultToWeb(username: String, followersCount: Long) {
+        sendToWeb(
+            JSONObject()
+                .put("source", "followclean-android")
+                .put("type", "PROFILE_RESULT")
+                .put(
+                    "result",
+                    JSONObject()
+                        .put("username", username)
+                        .put("followersCount", followersCount)
+                        .put("dataSource", "android")
+                        .put("updatedAt", Instant.now().toString())
+                )
+                .put("batch", batchJson())
+        )
+    }
+
+    private fun sendUnavailableToWeb(username: String, reason: String) {
+        sendToWeb(
+            JSONObject()
+                .put("source", "followclean-android")
+                .put("type", "PROFILE_UNAVAILABLE")
+                .put(
+                    "failure",
+                    JSONObject()
+                        .put("username", username)
+                        .put("reason", reason)
+                        .put("updatedAt", Instant.now().toString())
+                )
+                .put("batch", batchJson())
         )
     }
 
     private fun sendResultsToWeb() {
         val resultsObject = readResults()
         val resultsArray = JSONArray()
-        val keys = resultsObject.keys()
-        while (keys.hasNext()) {
-            val key = keys.next()
+        val resultKeys = resultsObject.keys()
+        while (resultKeys.hasNext()) {
+            val key = resultKeys.next()
             resultsArray.put(resultsObject.getJSONObject(key))
+        }
+
+        val failuresObject = readFailures()
+        val failuresArray = JSONArray()
+        val failureKeys = failuresObject.keys()
+        while (failureKeys.hasNext()) {
+            val key = failureKeys.next()
+            failuresArray.put(failuresObject.getJSONObject(key))
         }
 
         sendToWeb(
@@ -664,6 +758,7 @@ class MainActivity : Activity() {
                 .put("source", "followclean-android")
                 .put("type", "RESULTS")
                 .put("results", resultsArray)
+                .put("failures", failuresArray)
                 .put("batch", batchJson())
         )
     }
@@ -682,7 +777,7 @@ class MainActivity : Activity() {
             .put("running", running)
             .put("currentUsername", currentUsername)
             .put("processedThisRun", processedThisRun)
-            .put("maxPerRun", maxProfilesPerRun)
+            .put("queueTotal", queue.size)
     }
 
     private fun sendToWeb(payload: JSONObject) {
