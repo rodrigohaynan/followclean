@@ -52,6 +52,9 @@ export function CleanupManager() {
   const [tab, setTab] = useState<Tab>("priority");
   const [extensionReady, setExtensionReady] = useState(false);
   const [extensionNote, setExtensionNote] = useState("Aguardando extensão...");
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchCurrent, setBatchCurrent] = useState<string | null>(null);
+  const [batchProcessed, setBatchProcessed] = useState(0);
 
   useEffect(() => {
     Promise.all([getAnalyses(), getProtectedProfiles(), getCleanupSettings(), getProfileMetadata()])
@@ -85,6 +88,12 @@ export function CleanupManager() {
           followersCount?: unknown;
           updatedAt?: unknown;
         }>;
+        batch?: {
+          running?: unknown;
+          currentUsername?: unknown;
+          processedThisRun?: unknown;
+          lastMessage?: unknown;
+        } | null;
       };
 
       if (data?.source !== "followclean-extension") return;
@@ -106,7 +115,26 @@ export function CleanupManager() {
         return;
       }
 
-      if (data.type === "RESULTS" && Array.isArray(data.results)) {
+      if (data.type === "RESULTS") {
+        if (data.batch) {
+          setBatchRunning(Boolean(data.batch.running));
+          setBatchCurrent(
+            typeof data.batch.currentUsername === "string"
+              ? data.batch.currentUsername
+              : null,
+          );
+          setBatchProcessed(
+            typeof data.batch.processedThisRun === "number"
+              ? data.batch.processedThisRun
+              : 0,
+          );
+          if (typeof data.batch.lastMessage === "string") {
+            setExtensionNote(data.batch.lastMessage);
+          }
+        }
+
+        if (!Array.isArray(data.results)) return;
+
         const records: ProfileMetadata[] = data.results.flatMap((item) => {
           if (
             typeof item?.username !== "string" ||
@@ -168,6 +196,25 @@ export function CleanupManager() {
         type: "SET_QUEUE",
         usernames: review.map((item) => item.username),
       },
+      "*",
+    );
+  }
+
+  function startAutomaticVerification() {
+    window.postMessage(
+      {
+        source: "followclean-web",
+        type: "SET_QUEUE_AND_START",
+        usernames: review.map((item) => item.username),
+      },
+      "*",
+    );
+    setExtensionNote("Iniciando verificação automática...");
+  }
+
+  function pauseAutomaticVerification() {
+    window.postMessage(
+      { source: "followclean-web", type: "PAUSE_BATCH" },
       "*",
     );
   }
@@ -234,9 +281,12 @@ export function CleanupManager() {
           <div className={`rounded-2xl border p-4 text-sm ${extensionReady ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
             <div className="font-black">FollowClean Assist · navegador</div>
             <p className="mt-1 leading-6">{extensionNote}</p>
+            {batchRunning ? <p className="mt-1 text-xs font-black text-emerald-800">Lote em execução · {batchProcessed}/50 {batchCurrent ? `· @${batchCurrent}` : ""}</p> : null}
             <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" disabled={!extensionReady || review.length === 0} onClick={sendQueueToExtension} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Enviar {review.length.toLocaleString("pt-BR")} pendentes</button>
-              <button type="button" disabled={!extensionReady} onClick={syncExtensionResults} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Sincronizar resultados</button>
+              <button type="button" disabled={!extensionReady || review.length === 0 || batchRunning} onClick={startAutomaticVerification} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Verificar automaticamente</button>
+              <button type="button" disabled={!extensionReady || !batchRunning} onClick={pauseAutomaticVerification} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800 disabled:cursor-not-allowed disabled:opacity-40">Pausar</button>
+              <button type="button" disabled={!extensionReady || review.length === 0} onClick={sendQueueToExtension} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Só enviar fila</button>
+              <button type="button" disabled={!extensionReady} onClick={syncExtensionResults} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Sincronizar</button>
               <Link href="/extensao" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700">Instalar extensão</Link>
             </div>
           </div>
