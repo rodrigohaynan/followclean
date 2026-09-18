@@ -89,6 +89,15 @@ export async function saveAnalysis(
   return record;
 }
 
+export async function restoreAnalysisSnapshot(
+  record: StoredAnalysis,
+): Promise<void> {
+  const db = await openDatabase();
+  const tx = db.transaction(ANALYSES_STORE, "readwrite");
+  await requestToPromise(tx.objectStore(ANALYSES_STORE).put(record));
+  db.close();
+}
+
 export async function getAnalyses(): Promise<StoredAnalysis[]> {
   const db = await openDatabase();
   const tx = db.transaction(ANALYSES_STORE, "readonly");
