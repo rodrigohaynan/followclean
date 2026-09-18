@@ -120,7 +120,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.4"
+                "FollowCleanAndroid/0.3.5"
         }
 
         CookieManager.getInstance().apply {
@@ -481,6 +481,7 @@ class MainActivity : Activity() {
             when (json.optString("type")) {
                 "PING" -> sendReadyToWeb()
                 "GET_RESULTS" -> sendResultsToWeb()
+                "START_OAUTH" -> startInstagramOAuth()
                 "PAUSE_BATCH" -> pauseBatch("Pausado pelo usuário.")
                 "START_BATCH" -> {
                     val usernames = json.optJSONArray("usernames") ?: JSONArray()
@@ -490,6 +491,19 @@ class MainActivity : Activity() {
         }.onFailure {
             updateStatus("Comando inválido recebido do FollowClean.")
         }
+    }
+
+    private fun startInstagramOAuth() {
+        oauthRedeemAttempts = 0
+        prefs.edit().putBoolean("oauth_pending", true).apply()
+
+        val deviceKey = ensureOAuthDeviceKey()
+        val connectUrl =
+            "https://followclean.netlify.app/api/instagram/android-connect?deviceKey=" +
+                Uri.encode(deviceKey)
+
+        updateStatus("Preparando conexão segura com o Instagram...")
+        mainWebView.loadUrl(connectUrl)
     }
 
     private fun startBatch(usernames: List<String>) {
@@ -636,7 +650,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.4")
+                .put("version", "0.3.5")
         )
     }
 
