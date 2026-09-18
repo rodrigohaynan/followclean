@@ -100,6 +100,159 @@ export function CleanupManager() {
   const [cloudToken, setCloudToken] = useState<string | null>(null);
   const [cloudNote, setCloudNote] = useState("Nuvem ainda não configurada.");
   const [cloudSummary, setCloudSummary] = useState<CloudSummary | null>(null);
+  const [cloudHydrated, setCloudHydrated] = useState(false);
+
+  async function applyCloudState(state: Record<string, unknown>) {
+    const summary = state?.summary as Record<string, unknown> | undefined;
+    if (summary) {
+      setCloudSummary({
+        total: Number(summary.total || 0),
+        pending: Number(summary.pending || 0),
+        processing: Number(summary.processing || 0),
+        verified: Number(summary.verified || 0),
+        unavailable: Number(summary.unavailable || 0),
+      });
+    }
+
+    const snapshot = state?.snapshot as Record<string, unknown> | null | undefined;
+    if (snapshot?.analysis && typeof snapshot.analysis === "object") {
+      const createdAt =
+        typeof snapshot.analysis_created_at === "string"
+          ? snapshot.analysis_created_at
+          : typeof snapshot.updated_at === "string"
+            ? snapshot.updated_at
+            : new Date().toISOString();
+
+      const cloudRecord: StoredAnalysis = {
+        id: "cloud-snapshot",
+        createdAt,
+        sourceFile:
+          typeof snapshot.source_file === "string"
+            ? snapshot.source_file
+            : "Checkpoint em nuvem",
+        analysis: snapshot.analysis as StoredAnalysis["analysis"],
+      };
+
+      setLatest((current) => {
+        if (!current) return cloudRecord;
+        return cloudRecord.createdAt > current.createdAt ? cloudRecord : current;
+      });
+
+      if (Array.isArray(snapshot.protected_profiles)) {
+        const cloudProtected: ProtectedProfile[] =
+          snapshot.protected_profiles.flatMap((item: unknown) => {
+            if (!item || typeof item !== "object") return [];
+            const row = item as Record<string, unknown>;
+            if (typeof row.username !== "string") return [];
+            return [{
+              username: row.username.toLowerCase(),
+              createdAt:
+                typeof row.createdAt === "string"
+                  ? row.createdAt
+                  : new Date().toISOString(),
+              reason: typeof row.reason === "string" ? row.reason : undefined,
+            }];
+          });
+
+        setProtectedProfiles((current) => {
+          const map = new Map(
+            current.map((item) => [item.username, item] as const),
+          );
+          for (const item of cloudProtected) map.set(item.username, item);
+          return Array.from(map.values()).sort((a, b) =>
+            a.username.localeCompare(b.username),
+          );
+        });
+      }
+
+      if (snapshot.settings && typeof snapshot.settings === "object") {
+        const rawSettings = snapshot.settings as Record<string, unknown>;
+        setSettings((current) => ({
+          notFollowingBack:
+            typeof rawSettings.notFollowingBack === "boolean"
+              ? rawSettings.notFollowingBack
+              : current.notFollowingBack,
+          maxFollowers:
+            typeof rawSettings.maxFollowers === "number"
+              ? Math.max(0, Math.round(rawSettings.maxFollowers))
+              : current.maxFollowers,
+        }));
+      }
+    }
+
+    const rows = Array.isArray(state?.rows)
+      ? (state.rows as Array<Record<string, unknown>>)
+      : [];
+
+    const verifiedRecords: ProfileMetadata[] = rows.flatMap((item) => {
+      if (item.status !== "verified" || typeof item.username !== "string") {
+        return [];
+      }
+
+      const followersCount = Number(item.followers_count);
+      if (!Number.isFinite(followersCount)) return [];
+
+      const rawSource =
+        typeof item.data_source === "string" ? item.data_source : "extension";
+      const dataSource: ProfileMetadata["dataSource"] =
+        rawSource === "manual" ||
+        rawSource === "android" ||
+        rawSource === "meta_business_discovery"
+          ? rawSource
+          : "extension";
+
+      return [{
+        username: item.username.toLowerCase(),
+        followersCount,
+        parserVersion: Number(item.parser_version || 2),
+        dataSource,
+        updatedAt:
+          typeof item.updated_at === "string"
+            ? item.updated_at
+            : new Date().toISOString(),
+      }];
+    });
+
+    if (verifiedRecords.length) {
+      await upsertProfileMetadataBatch(verifiedRecords);
+      setProfileMetadata((current) => {
+        const map = new Map(
+          current.map((item) => [item.username, item] as const),
+        );
+        for (const item of verifiedRecords) map.set(item.username, item);
+        return Array.from(map.values());
+      });
+    }
+
+    const cloudFailures: UnavailableProfile[] = rows.flatMap((item) => {
+      if (item.status !== "unavailable" || typeof item.username !== "string") {
+        return [];
+      }
+
+      return [{
+        username: item.username.toLowerCase(),
+        reason:
+          typeof item.failure_reason === "string"
+            ? item.failure_reason
+            : "unavailable",
+        updatedAt:
+          typeof item.updated_at === "string"
+            ? item.updated_at
+            : new Date().toISOString(),
+        source: "extension" as const,
+      }];
+    });
+
+    if (cloudFailures.length) {
+      setExtensionFailures((current) => {
+        const map = new Map(
+          current.map((item) => [item.username, item] as const),
+        );
+        for (const item of cloudFailures) map.set(item.username, item);
+        return Array.from(map.values());
+      });
+    }
+  }
 
   useEffect(() => {
     Promise.all([getAnalyses(), getProtectedProfiles(), getCleanupSettings(), getProfileMetadata()])
@@ -342,93 +495,27 @@ export function CleanupManager() {
           "*",
         );
 
-        if (!configured) return;
+        if (!configured) {
+          setCloudHydrated(true);
+          return;
+        }
 
         const stateResponse = await fetch("/api/cleanup/cloud/state", {
           cache: "no-store",
         });
-        if (!stateResponse.ok) return;
+        if (!stateResponse.ok) {
+          setCloudHydrated(true);
+          return;
+        }
 
         const state = await stateResponse.json();
         if (cancelled) return;
 
-        if (state?.summary) {
-          setCloudSummary({
-            total: Number(state.summary.total || 0),
-            pending: Number(state.summary.pending || 0),
-            processing: Number(state.summary.processing || 0),
-            verified: Number(state.summary.verified || 0),
-            unavailable: Number(state.summary.unavailable || 0),
-          });
-        }
-
-        const verifiedRecords: ProfileMetadata[] = Array.isArray(state?.rows)
-          ? state.rows.flatMap((item: Record<string, unknown>) => {
-              if (
-                item.status !== "verified" ||
-                typeof item.username !== "string"
-              ) {
-                return [];
-              }
-
-              const followersCount = Number(item.followers_count);
-              if (!Number.isFinite(followersCount)) return [];
-
-              return [{
-                username: item.username.toLowerCase(),
-                followersCount,
-                parserVersion: Number(item.parser_version || 2),
-                dataSource: "extension" as const,
-                updatedAt:
-                  typeof item.updated_at === "string"
-                    ? item.updated_at
-                    : new Date().toISOString(),
-              }];
-            })
-          : [];
-
-        if (verifiedRecords.length) {
-          await upsertProfileMetadataBatch(verifiedRecords);
-          setProfileMetadata((current) => {
-            const map = new Map(current.map((item) => [item.username, item] as const));
-            for (const item of verifiedRecords) map.set(item.username, item);
-            return Array.from(map.values());
-          });
-        }
-
-        const cloudFailures: UnavailableProfile[] = Array.isArray(state?.rows)
-          ? state.rows.flatMap((item: Record<string, unknown>) => {
-              if (
-                item.status !== "unavailable" ||
-                typeof item.username !== "string"
-              ) {
-                return [];
-              }
-
-              return [{
-                username: item.username.toLowerCase(),
-                reason:
-                  typeof item.failure_reason === "string"
-                    ? item.failure_reason
-                    : "unavailable",
-                updatedAt:
-                  typeof item.updated_at === "string"
-                    ? item.updated_at
-                    : new Date().toISOString(),
-                source: "extension" as const,
-              }];
-            })
-          : [];
-
-        if (cloudFailures.length) {
-          setExtensionFailures((current) => {
-            const map = new Map(current.map((item) => [item.username, item] as const));
-            for (const item of cloudFailures) map.set(item.username, item);
-            return Array.from(map.values());
-          });
-        }
+        await applyCloudState(state);
+        setCloudHydrated(true);
       } catch {
         if (!cancelled) {
+          setCloudHydrated(true);
           setCloudNote("Não foi possível sincronizar a nuvem agora. O modo local continua disponível.");
         }
       }
@@ -439,6 +526,63 @@ export function CleanupManager() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!cloudConfigured || !cloudHydrated || loading || !latest) return;
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await fetch("/api/cleanup/cloud/snapshot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              analysis: latest.analysis,
+              sourceFile: latest.sourceFile,
+              analysisCreatedAt: latest.createdAt,
+              protectedProfiles,
+              settings,
+              metadata: profileMetadata,
+              failures: extensionFailures,
+            }),
+          });
+
+          if (!response.ok) {
+            setCloudNote("O progresso local continua salvo, mas ainda não foi enviado para a nuvem.");
+            return;
+          }
+
+          const payload = await response.json();
+          if (payload?.summary) {
+            setCloudSummary({
+              total: Number(payload.summary.total || 0),
+              pending: Number(payload.summary.pending || 0),
+              processing: Number(payload.summary.processing || 0),
+              verified: Number(payload.summary.verified || 0),
+              unavailable: Number(payload.summary.unavailable || 0),
+            });
+          }
+
+          setCloudNote(
+            "Progresso sincronizado na nuvem. Outros dispositivos podem continuar deste ponto.",
+          );
+        } catch {
+          setCloudNote("O progresso local continua salvo, mas a sincronização em nuvem falhou temporariamente.");
+        }
+      })();
+    }, 1200);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    cloudConfigured,
+    cloudHydrated,
+    loading,
+    latest,
+    profileMetadata,
+    protectedProfiles,
+    settings,
+    extensionFailures,
+  ]);
 
   const protectedSet = useMemo(() => new Set(protectedProfiles.map((item) => item.username)), [protectedProfiles]);
   const queue = useMemo(() => latest ? buildCleanupQueue(latest.analysis, protectedSet, settings, profileMetadata) : [], [latest, protectedSet, settings, profileMetadata]);
@@ -558,69 +702,9 @@ export function CleanupManager() {
       });
       if (!response.ok) return;
       const state = await response.json();
-
-      if (state?.summary) {
-        setCloudSummary({
-          total: Number(state.summary.total || 0),
-          pending: Number(state.summary.pending || 0),
-          processing: Number(state.summary.processing || 0),
-          verified: Number(state.summary.verified || 0),
-          unavailable: Number(state.summary.unavailable || 0),
-        });
-      }
-
-      const records: ProfileMetadata[] = Array.isArray(state?.rows)
-        ? state.rows.flatMap((item: Record<string, unknown>) => {
-            if (item.status !== "verified" || typeof item.username !== "string") return [];
-            const followersCount = Number(item.followers_count);
-            if (!Number.isFinite(followersCount)) return [];
-            return [{
-              username: item.username.toLowerCase(),
-              followersCount,
-              parserVersion: Number(item.parser_version || 2),
-              dataSource: "extension" as const,
-              updatedAt:
-                typeof item.updated_at === "string"
-                  ? item.updated_at
-                  : new Date().toISOString(),
-            }];
-          })
-        : [];
-
-      if (records.length) {
-        await upsertProfileMetadataBatch(records);
-        setProfileMetadata((current) => {
-          const map = new Map(current.map((item) => [item.username, item] as const));
-          for (const item of records) map.set(item.username, item);
-          return Array.from(map.values());
-        });
-      }
-
-      const failures: UnavailableProfile[] = Array.isArray(state?.rows)
-        ? state.rows.flatMap((item: Record<string, unknown>) => {
-            if (item.status !== "unavailable" || typeof item.username !== "string") return [];
-            return [{
-              username: item.username.toLowerCase(),
-              reason:
-                typeof item.failure_reason === "string"
-                  ? item.failure_reason
-                  : "unavailable",
-              updatedAt:
-                typeof item.updated_at === "string"
-                  ? item.updated_at
-                  : new Date().toISOString(),
-              source: "extension" as const,
-            }];
-          })
-        : [];
-
-      if (failures.length) {
-        setExtensionFailures((current) => {
-          const map = new Map(current.map((item) => [item.username, item] as const));
-          for (const item of failures) map.set(item.username, item);
-          return Array.from(map.values());
-        });
-      }
+      await applyCloudState(state);
+      setCloudHydrated(true);
+      setCloudNote("Checkpoint em nuvem atualizado neste dispositivo.");
     } catch {
       setCloudNote("Falha temporária ao buscar o checkpoint em nuvem.");
     }
