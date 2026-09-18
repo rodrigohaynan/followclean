@@ -1,11 +1,16 @@
 import { AndroidOAuthReturn } from "@/components/android-oauth-return";
+import { AndroidOAuthStoredReturn } from "@/components/android-oauth-stored-return";
 
 export default async function AndroidRetornoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ handoff?: string }>;
+  searchParams: Promise<{ handoff?: string; stored?: string }>;
 }) {
   const params = await searchParams;
+  if (params.stored === "1") {
+    return <AndroidOAuthStoredReturn />;
+  }
+
   const handoff = params.handoff ?? "";
 
   if (!handoff) {
