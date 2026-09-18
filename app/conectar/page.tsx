@@ -27,6 +27,7 @@ const statusMessages: Record<string, { tone: string; text: string }> = {
   profile_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "O token foi obtido, mas a API do Instagram recusou a leitura do perfil. Vamos revisar permissões e campos da conta profissional." },
   session_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "O Instagram conectou, mas o FollowClean não conseguiu salvar a sessão com segurança." },
   internal_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "A conexão chegou ao FollowClean, mas ocorreu uma falha interna durante o processamento." },
+  android_handoff_error: { tone: "border-red-200 bg-red-50 text-red-900", text: "A autorização do Instagram foi concluída, mas o retorno para o aplicativo expirou. Inicie a conexão novamente pelo APK." },
 };
 
 export default async function ConectarPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
