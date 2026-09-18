@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { sealInstagramSession } from "@/lib/instagram/session";
 import { verifyAndroidOAuthState } from "@/lib/instagram/oauth-state";
 import { sealAndroidHandoff } from "@/lib/instagram/android-handoff";
+import {
+  consumeStoredAndroidOAuthState,
+  isStoredAndroidOAuthState,
+} from "@/lib/instagram/android-oauth-state-store";
 
 const OAUTH_STATE_COOKIE = "followclean_ig_oauth_state";
 const SESSION_COOKIE = "followclean_ig_session";
@@ -47,14 +51,24 @@ export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
   const expectedState = request.cookies.get(OAUTH_STATE_COOKIE)?.value;
-  const isAndroidFlow = verifyAndroidOAuthState(state);
 
   if (!appId || !appSecret) return redirectWithStatus(request, "setup");
-  if (
-    !code ||
-    !state ||
-    (!isAndroidFlow && (!expectedState || state !== expectedState))
-  ) {
+  if (!code || !state) {
+    return redirectWithStatus(request, "state_error");
+  }
+
+  let isAndroidFlow = verifyAndroidOAuthState(state);
+
+  if (!isAndroidFlow && isStoredAndroidOAuthState(state)) {
+    try {
+      isAndroidFlow = await consumeStoredAndroidOAuthState(state);
+    } catch (error) {
+      console.error("[Instagram OAuth] android_state_lookup_error", error);
+      return redirectWithStatus(request, "android_state_error");
+    }
+  }
+
+  if (!isAndroidFlow && (!expectedState || state !== expectedState)) {
     return redirectWithStatus(request, "state_error");
   }
 
