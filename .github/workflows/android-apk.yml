@@ -7,13 +7,28 @@ on:
       - "android-app/**"
       - ".github/workflows/android-apk.yml"
 
+permissions:
+  contents: write
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    env:
+      FOLLOWCLEAN_SIGNING_PASSWORD: ${{ secrets.FOLLOWCLEAN_SIGNING_PASSWORD }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require stable signing secret
+        shell: bash
+        run: |
+          if [ -z "$FOLLOWCLEAN_SIGNING_PASSWORD" ]; then
+            echo "::error::Configure the repository secret FOLLOWCLEAN_SIGNING_PASSWORD before generating installable APK updates."
+            exit 1
+          fi
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -35,12 +50,46 @@ jobs:
         with:
           gradle-version: "8.10.2"
 
-      - name: Build debug APK
-        run: gradle -p android-app :app:assembleDebug
+      - name: Prepare stable signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/followclean-signing"
+          SIGNING_FILE="$RUNNER_TEMP/followclean-signing/followclean-release.p12"
+          STORED_KEY="android-app/signing/followclean-release.p12.b64"
 
-      - name: Upload APK
+          if [ -f "$STORED_KEY" ]; then
+            base64 --decode "$STORED_KEY" > "$SIGNING_FILE"
+          else
+            mkdir -p android-app/signing
+            keytool -genkeypair \
+              -keystore "$SIGNING_FILE" \
+              -storetype PKCS12 \
+              -storepass "$FOLLOWCLEAN_SIGNING_PASSWORD" \
+              -keypass "$FOLLOWCLEAN_SIGNING_PASSWORD" \
+              -alias followclean \
+              -keyalg RSA \
+              -keysize 3072 \
+              -validity 10000 \
+              -dname "CN=FollowClean,O=FollowClean,C=BR"
+
+            base64 -w 0 "$SIGNING_FILE" > "$STORED_KEY"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add "$STORED_KEY"
+            git commit -m "chore(android): persist encrypted release signing key"
+            git push origin HEAD:main
+          fi
+
+          echo "FOLLOWCLEAN_SIGNING_FILE=$SIGNING_FILE" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        run: gradle -p android-app :app:assembleRelease
+
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: FollowClean-Android-debug
-          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          name: FollowClean-Android-release
+          path: android-app/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
