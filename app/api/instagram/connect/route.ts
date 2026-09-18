@@ -27,12 +27,6 @@ export async function GET(request: NextRequest) {
     process.env.INSTAGRAM_REDIRECT_URI ??
     `${request.nextUrl.origin}/api/instagram/callback`;
   const state = crypto.randomUUID().replaceAll("-", "");
-  const previousStates = (request.cookies.get(OAUTH_STATE_COOKIE)?.value ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .slice(-4);
-  const acceptedStates = [...previousStates, state];
   const userAgent = request.headers.get("user-agent") ?? "";
   const isAndroid = /Android/i.test(userAgent);
 
@@ -41,7 +35,7 @@ export async function GET(request: NextRequest) {
     : buildAuthUrl(appId, redirectUri, state);
 
   const response = NextResponse.redirect(destination);
-  response.cookies.set(OAUTH_STATE_COOKIE, acceptedStates.join(","), {
+  response.cookies.set(OAUTH_STATE_COOKIE, state, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
