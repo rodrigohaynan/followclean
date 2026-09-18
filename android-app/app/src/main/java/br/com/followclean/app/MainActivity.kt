@@ -10,6 +10,8 @@ import android.os.Handler
 import android.os.Looper
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -36,6 +38,7 @@ class MainActivity : Activity() {
     private var processedThisRun = 0
     private var currentUsername: String? = null
     private var extractionAttempts = 0
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
     private val maxProfilesPerRun = 30
     private val betweenProfilesMs = 12_000L
@@ -100,6 +103,29 @@ class MainActivity : Activity() {
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(mainWebView, true)
+        }
+
+        mainWebView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                webView: WebView,
+                filePathCallback: ValueCallback<Array<Uri>>,
+                fileChooserParams: FileChooserParams
+            ): Boolean {
+                this@MainActivity.filePathCallback?.onReceiveValue(null)
+                this@MainActivity.filePathCallback = filePathCallback
+
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "application/zip"
+                    putExtra(
+                        Intent.EXTRA_MIME_TYPES,
+                        arrayOf("application/zip", "application/x-zip-compressed")
+                    )
+                }
+
+                startActivityForResult(intent, FILE_CHOOSER_REQUEST)
+                return true
+            }
         }
 
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
@@ -444,6 +470,17 @@ class MainActivity : Activity() {
         }.getOrDefault("")
     }
 
+    @Deprecated("Deprecated in Android SDK; kept for WebView file chooser compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == FILE_CHOOSER_REQUEST) {
+            val result = WebChromeClient.FileChooserParams.parseResult(resultCode, data)
+            filePathCallback?.onReceiveValue(result)
+            filePathCallback = null
+            return
+        }
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
     override fun onBackPressed() {
         if (mainWebView.canGoBack()) {
             mainWebView.goBack()
@@ -460,6 +497,7 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        private const val FILE_CHOOSER_REQUEST = 9012
         private val EXTRACT_SCRIPT = """
             (() => {
               function parseHumanCount(raw) {
