@@ -11,6 +11,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { unsealInstagramSession } from "@/lib/instagram/session";
+import { InstagramConnectButton } from "@/components/instagram-connect-button";
 
 const statusMessages: Record<string, { tone: string; text: string }> = {
   connected: { tone: "border-emerald-200 bg-emerald-50 text-emerald-900", text: "Conta do Instagram conectada com sucesso." },
@@ -80,7 +81,7 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
                 <div className="flex items-center gap-3"><div className="rounded-2xl bg-gradient-to-br from-purple-600 via-pink-600 to-orange-500 p-3 text-white"><Camera size={25} /></div><div><h2 className="text-xl font-black text-slate-950">Instagram Login</h2><p className="text-sm text-slate-500">OAuth oficial da Meta</p></div></div>
                 <p className="mt-5 text-sm leading-6 text-slate-600">A API oficial atual aceita contas profissionais do Instagram — Creator ou Business. Contas pessoais precisam ser convertidas para profissional para usar esta integração.</p>
               </div>
-              {configured ? <a href="/api/instagram/connect" className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-black text-white"><Camera size={18} /> Conectar Instagram</a> : <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-center text-sm font-bold text-amber-800">Aguardando credenciais da Meta</div>}
+              {configured ? <InstagramConnectButton /> : <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-center text-sm font-bold text-amber-800">Aguardando credenciais da Meta</div>}
             </div>
           </section>
         )}
