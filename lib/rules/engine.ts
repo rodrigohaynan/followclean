@@ -3,6 +3,7 @@ import type { InstagramAnalysis } from "@/lib/instagram/types";
 export type ProfileDataSource =
   | "meta_business_discovery"
   | "extension"
+  | "android"
   | "manual"
   | "unknown";
 
