@@ -118,6 +118,7 @@ export function CleanupManager() {
   const [restoreBackupOpen, setRestoreBackupOpen] = useState(false);
   const [restoreBackupInput, setRestoreBackupInput] = useState("");
   const [restoreBackupBusy, setRestoreBackupBusy] = useState(false);
+  const [restoreBackupStatus, setRestoreBackupStatus] = useState("");
 
   async function applyCloudState(state: Record<string, unknown>) {
     const summary = state?.summary as Record<string, unknown> | undefined;
@@ -1124,11 +1125,14 @@ export function CleanupManager() {
   async function restoreBackupValue(raw: string) {
     const value = raw.trim();
     if (!value) {
-      setExtensionNote("Cole o código de backup antes de restaurar.");
+      const message = "Cole o código de backup antes de restaurar.";
+      setExtensionNote(message);
+      setRestoreBackupStatus(message);
       return;
     }
 
     setRestoreBackupBusy(true);
+    setRestoreBackupStatus("Lendo e restaurando o backup...");
     try {
       const backup = decodeFollowCleanBackup(value);
 
@@ -1262,25 +1266,34 @@ export function CleanupManager() {
         );
       }
 
+      const restoredMessage = restoredLatest
+        ? `Backup restaurado com sucesso: ${restoredMetadata.length.toLocaleString("pt-BR")} perfis verificados, ${restoredFailures.length.toLocaleString("pt-BR")} indisponíveis e ${restoredProtected.length.toLocaleString("pt-BR")} protegidos recuperados.`
+        : "O backup foi lido, mas não contém uma análise principal para restaurar.";
+
+      setExtensionNote(restoredMessage);
+      setRestoreBackupStatus(restoredMessage);
+
       if (restoredLatest) {
-        setRestoreBackupOpen(false);
-        setRestoreBackupInput("");
+        window.setTimeout(() => {
+          setRestoreBackupOpen(false);
+          setRestoreBackupInput("");
+          setRestoreBackupStatus("");
+        }, 1400);
       }
-      setExtensionNote(
-        restoredLatest
-          ? "Backup restaurado com sucesso. As listas e o progresso foram recuperados."
-          : "O backup foi lido, mas não contém uma análise principal para restaurar.",
-      );
-    } catch {
-      setExtensionNote(
-        "Não foi possível restaurar: o código está incompleto ou não é um backup válido do FollowClean.",
-      );
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? `Não foi possível restaurar: ${error.message}`
+          : "Não foi possível restaurar: o código está incompleto ou não é um backup válido do FollowClean.";
+      setExtensionNote(message);
+      setRestoreBackupStatus(message);
     } finally {
       setRestoreBackupBusy(false);
     }
   }
 
   async function restorePortableBackup() {
+    setRestoreBackupStatus("");
     setRestoreBackupOpen(true);
     setExtensionNote(
       "Cole o código FCBACKUP1: no campo de restauração. Você também pode tentar preencher pela área de transferência.",
@@ -1635,6 +1648,18 @@ export function CleanupManager() {
           className="mt-4 h-48 w-full resize-y rounded-xl border border-slate-300 bg-slate-50 p-3 font-mono text-xs leading-5 text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
         />
 
+        {restoreBackupStatus ? (
+          <div className={`mt-3 rounded-xl border px-3 py-2 text-sm font-bold leading-5 ${
+            restoreBackupStatus.startsWith("Backup restaurado")
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : restoreBackupStatus.startsWith("Lendo")
+                ? "border-blue-200 bg-blue-50 text-blue-800"
+                : "border-red-200 bg-red-50 text-red-800"
+          }`}>
+            {restoreBackupStatus}
+          </div>
+        ) : null}
+
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
@@ -1646,7 +1671,10 @@ export function CleanupManager() {
           <button
             type="button"
             disabled={restoreBackupBusy || !restoreBackupInput.trim()}
-            onClick={() => void restoreBackupValue(restoreBackupInput)}
+            onClick={() => {
+              setRestoreBackupStatus("Lendo e restaurando o backup...");
+              void restoreBackupValue(restoreBackupInput);
+            }}
             className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             {restoreBackupBusy ? "Restaurando..." : "Restaurar agora"}
