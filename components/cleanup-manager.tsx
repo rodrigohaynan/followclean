@@ -115,6 +115,9 @@ export function CleanupManager() {
   const [appSnapshotSavedAt, setAppSnapshotSavedAt] = useState<string | null>(null);
   const [appCloudPending, setAppCloudPending] = useState(false);
   const [lastCloudSyncAt, setLastCloudSyncAt] = useState<string | null>(null);
+  const [restoreBackupOpen, setRestoreBackupOpen] = useState(false);
+  const [restoreBackupInput, setRestoreBackupInput] = useState("");
+  const [restoreBackupBusy, setRestoreBackupBusy] = useState(false);
 
   async function applyCloudState(state: Record<string, unknown>) {
     const summary = state?.summary as Record<string, unknown> | undefined;
@@ -389,12 +392,15 @@ export function CleanupManager() {
       if (data.type === "BACKUP_CLIPBOARD" && fromAndroid) {
         if (typeof data.value !== "string" || !data.value.trim()) {
           setExtensionNote(
-            "Nenhum backup encontrado na área de transferência. Copie novamente o código FCBACKUP1: e tente restaurar.",
+            "Nenhum backup encontrado na área de transferência. Você também pode colar o código manualmente no campo de restauração.",
           );
+          setRestoreBackupOpen(true);
           return;
         }
 
-        void restoreBackupValue(data.value);
+        setRestoreBackupInput(data.value);
+        setRestoreBackupOpen(true);
+        setExtensionNote("Backup encontrado. Confira o código e toque em Restaurar agora.");
         return;
       }
 
@@ -1116,8 +1122,15 @@ export function CleanupManager() {
   }
 
   async function restoreBackupValue(raw: string) {
+    const value = raw.trim();
+    if (!value) {
+      setExtensionNote("Cole o código de backup antes de restaurar.");
+      return;
+    }
+
+    setRestoreBackupBusy(true);
     try {
-      const backup = decodeFollowCleanBackup(raw);
+      const backup = decodeFollowCleanBackup(value);
 
       let restoredLatest: StoredAnalysis | null = null;
       let restoredProtected: ProtectedProfile[] = [];
@@ -1249,6 +1262,10 @@ export function CleanupManager() {
         );
       }
 
+      if (restoredLatest) {
+        setRestoreBackupOpen(false);
+        setRestoreBackupInput("");
+      }
       setExtensionNote(
         restoredLatest
           ? "Backup restaurado com sucesso. As listas e o progresso foram recuperados."
@@ -1258,23 +1275,39 @@ export function CleanupManager() {
       setExtensionNote(
         "Não foi possível restaurar: o código está incompleto ou não é um backup válido do FollowClean.",
       );
+    } finally {
+      setRestoreBackupBusy(false);
     }
   }
 
   async function restorePortableBackup() {
+    setRestoreBackupOpen(true);
+    setExtensionNote(
+      "Cole o código FCBACKUP1: no campo de restauração. Você também pode tentar preencher pela área de transferência.",
+    );
+  }
+
+  async function fillBackupFromClipboard() {
     if (androidReady && androidBridge()?.postMessage) {
-      setExtensionNote("Lendo o backup da área de transferência...");
       androidBridge()?.postMessage(
         JSON.stringify({ type: "READ_BACKUP_CLIPBOARD" }),
       );
       return;
     }
 
-    const raw = window.prompt(
-      "Cole aqui o código de backup do FollowClean (começa com FCBACKUP1:).",
-    );
-    if (!raw) return;
-    await restoreBackupValue(raw);
+    try {
+      const value = await navigator.clipboard.readText();
+      if (!value.trim()) {
+        setExtensionNote("A área de transferência está vazia.");
+        return;
+      }
+      setRestoreBackupInput(value);
+      setExtensionNote("Backup preenchido pela área de transferência.");
+    } catch {
+      setExtensionNote(
+        "Não foi possível ler a área de transferência automaticamente. Cole o código manualmente.",
+      );
+    }
   }
 
   async function uploadLocalProgressToCloud() {
@@ -1572,8 +1605,63 @@ export function CleanupManager() {
     ]);
   }
 
+  const restoreBackupDialog = restoreBackupOpen ? (
+    <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/60 p-3 sm:items-center sm:p-6">
+      <div className="w-full max-w-2xl rounded-[1.75rem] bg-white p-5 shadow-2xl sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-xl font-black text-slate-950">Restaurar backup</h3>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              Cole abaixo o código completo que começa com FCBACKUP1:. O campo aceita backups grandes.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRestoreBackupOpen(false)}
+            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Fechar"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <textarea
+          value={restoreBackupInput}
+          onChange={(event) => setRestoreBackupInput(event.target.value)}
+          placeholder="FCBACKUP1:..."
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          className="mt-4 h-48 w-full resize-y rounded-xl border border-slate-300 bg-slate-50 p-3 font-mono text-xs leading-5 text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
+        />
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void fillBackupFromClipboard()}
+            className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-black text-slate-700"
+          >
+            Preencher da área de transferência
+          </button>
+          <button
+            type="button"
+            disabled={restoreBackupBusy || !restoreBackupInput.trim()}
+            onClick={() => void restoreBackupValue(restoreBackupInput)}
+            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {restoreBackupBusy ? "Restaurando..." : "Restaurar agora"}
+          </button>
+        </div>
+
+        <p className="mt-3 text-xs leading-5 text-slate-400">
+          Não desinstale o aplicativo nem apague dados enquanto a restauração estiver em andamento.
+        </p>
+      </div>
+    </div>
+  ) : null;
+
   if (loading) return <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">Carregando regras locais...</div>;
-  if (!latest) return <div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2><p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">No APK, copie primeiro o código FCBACKUP1: para a área de transferência e toque em Restaurar backup.</p></div>;
+  if (!latest) return <><div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2><p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">O botão Restaurar backup abre um campo grande para você colar manualmente o código completo.</p></div>{restoreBackupDialog}</>;
 
   const activeList =
     tab === "priority"
@@ -1585,6 +1673,7 @@ export function CleanupManager() {
           : [];
 
   return (
+    <>
     <div className="space-y-6">
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <div className="rounded-2xl border border-red-200 bg-red-50/50 p-5 shadow-sm"><p className="text-sm font-semibold text-red-700">Prioridade</p><p className="mt-2 text-3xl font-black text-red-950">{priority.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-red-600/70">Não segue + até {settings.maxFollowers.toLocaleString("pt-BR")} seguidores</p></div>
@@ -1736,5 +1825,7 @@ export function CleanupManager() {
         {tab === "protected" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredProtected.map((item) => <div key={item.username} className="flex items-center justify-between gap-4 px-6 py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">Protegido neste dispositivo</p></div><button type="button" onClick={() => removeProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"><X size={14} /> Remover proteção</button></div>)}{!filteredProtected.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil protegido.</div> : null}</div> : tab === "unavailable" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredUnavailable.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-2 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">{unavailableReasonLabel(item.reason)} · Fonte: {item.source === "import" ? "arquivo do Instagram" : item.source === "android" ? "APK Android" : "verificação automática"}</p></div>{!item.username.startsWith("__deleted__") ? <div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => openProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Testar perfil</button><button type="button" onClick={() => void reviewProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Revisar novamente</button></div> : null}</div>)}{!filteredUnavailable.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil indisponível identificado.</div> : null}</div> : <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{activeList.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-black text-slate-900">@{item.username}</p>{typeof item.followersCount === "number" ? <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.classification === "above_limit" ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>{item.followersCount.toLocaleString("pt-BR")} seguidores</span> : <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">contagem pendente</span>}</div><p className="mt-1 text-xs text-slate-500">{reviewFlags[item.username] ? "Leitura automática inconclusiva · " : ""}{item.reasons.join(" · ")} · Fonte: {sourceLabel(item.dataSource)}</p></div><div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => openProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Abrir perfil</button><button type="button" onClick={() => void reviewProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">{reviewFlags[item.username] ? "Revisar novamente" : "Revisar"}</button>{typeof item.followersCount !== "number" ? <button type="button" onClick={() => saveManualFollowers(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Informar seguidores</button> : null}<button type="button" onClick={() => addProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700"><ShieldCheck size={14} /> Proteger</button></div></div>)}{!activeList.length ? <div className="p-8 text-center text-sm text-slate-500">{tab === "priority" ? "Nenhum perfil com contagem conhecida está dentro do limite atual." : tab === "above" ? "Nenhum perfil conhecido está acima do limite atual." : "Nenhum perfil aguardando enriquecimento."}</div> : null}</div>}
       </section>
     </div>
+    {restoreBackupDialog}
+    </>
   );
 }
