@@ -1,4 +1,4 @@
-import { strFromU8, strToU8, zlibSync, unzlibSync } from "fflate";
+import { strFromU8, strToU8, Unzlib, zlibSync, unzlibSync } from "fflate";
 
 export const FOLLOWCLEAN_BACKUP_PREFIX = "FCBACKUP1:";
 
@@ -60,4 +60,146 @@ export function decodeFollowCleanBackup(value: string) {
   }
 
   return envelope.payload as Record<string, unknown>;
+}
+
+
+function normalizedBackupBytes(value: string) {
+  const raw = value.trim();
+  const prefixIndex = raw.indexOf(FOLLOWCLEAN_BACKUP_PREFIX);
+  if (prefixIndex < 0) {
+    throw new Error("Backup do FollowClean inválido.");
+  }
+
+  const encoded = raw
+    .slice(prefixIndex + FOLLOWCLEAN_BACKUP_PREFIX.length)
+    .replace(/["'\s]/g, "");
+
+  if (!encoded) {
+    throw new Error("Backup do FollowClean vazio.");
+  }
+
+  return base64ToBytes(encoded);
+}
+
+function extractBalancedJsonValue(
+  text: string,
+  key: string,
+): unknown | undefined {
+  const token = `"${key}"`;
+  const keyIndex = text.indexOf(token);
+  if (keyIndex < 0) return undefined;
+
+  const colonIndex = text.indexOf(":", keyIndex + token.length);
+  if (colonIndex < 0) return undefined;
+
+  let start = colonIndex + 1;
+  while (start < text.length && /\s/.test(text[start])) start += 1;
+  if (start >= text.length) return undefined;
+
+  const opening = text[start];
+  if (opening !== "{" && opening !== "[") return undefined;
+
+  const stack: string[] = [opening];
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start + 1; i < text.length; i += 1) {
+    const char = text[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{" || char === "[") {
+      stack.push(char);
+      continue;
+    }
+
+    if (char === "}" || char === "]") {
+      const expected = char === "}" ? "{" : "[";
+      if (stack[stack.length - 1] !== expected) return undefined;
+      stack.pop();
+
+      if (!stack.length) {
+        try {
+          return JSON.parse(text.slice(start, i + 1));
+        } catch {
+          return undefined;
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
+export function salvageFollowCleanBackup(value: string) {
+  const bytes = normalizedBackupBytes(value);
+  const chunks: Uint8Array[] = [];
+
+  const stream = new Unzlib((chunk) => {
+    if (chunk?.length) chunks.push(chunk);
+  });
+
+  // Deliberately do not finalize the stream. For a truncated zlib payload this
+  // lets fflate emit every complete decompressed block it can still recover,
+  // instead of failing immediately with "unexpected EOF".
+  stream.push(bytes, false);
+
+  if (!chunks.length) {
+    throw new Error("O backup está truncado antes dos dados recuperáveis.");
+  }
+
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const joined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  const text = strFromU8(joined);
+
+  try {
+    const envelope = JSON.parse(text) as {
+      payload?: unknown;
+    };
+    if (envelope?.payload && typeof envelope.payload === "object") {
+      return envelope.payload as Record<string, unknown>;
+    }
+  } catch {
+    // Expected for a genuinely truncated backup; recover complete fields below.
+  }
+
+  const payload: Record<string, unknown> = {};
+  for (const key of [
+    "latest",
+    "protectedProfiles",
+    "settings",
+    "profileMetadata",
+    "failures",
+  ] as const) {
+    const recovered = extractBalancedJsonValue(text, key);
+    if (recovered !== undefined) payload[key] = recovered;
+  }
+
+  if (!Object.keys(payload).length) {
+    throw new Error(
+      "O backup foi cortado antes de qualquer bloco completo poder ser recuperado.",
+    );
+  }
+
+  return payload;
 }
