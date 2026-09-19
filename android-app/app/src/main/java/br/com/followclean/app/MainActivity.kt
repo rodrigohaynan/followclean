@@ -126,7 +126,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.13"
+                "FollowCleanAndroid/0.3.14"
         }
 
         CookieManager.getInstance().apply {
@@ -487,6 +487,7 @@ class MainActivity : Activity() {
                     if (snapshot != null) saveAppSnapshot(snapshot)
                 }
                 "GET_SNAPSHOT" -> sendAppSnapshotToWeb()
+                "READ_BACKUP_CLIPBOARD" -> sendBackupFromClipboard()
                 "CLOUD_SYNCED" -> markCloudSynced()
                 "START_OAUTH" -> startInstagramOAuth()
                 "PAUSE_BATCH" -> pauseBatch("Pausado pelo usuário.")
@@ -814,10 +815,29 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.13")
+                .put("version", "0.3.14")
                 .put("snapshotSavedAt", prefs.getString("app_snapshot_saved_at", null))
                 .put("cloudSyncPending", prefs.getBoolean("cloud_sync_pending", false))
                 .put("lastCloudSyncAt", prefs.getString("last_cloud_sync_at", null))
+        )
+    }
+
+    private fun sendBackupFromClipboard() {
+        val clipboard =
+            getSystemService(CLIPBOARD_SERVICE) as? ClipboardManager
+        val clip = clipboard?.primaryClip
+        val text =
+            if (clip != null && clip.itemCount > 0) {
+                clip.getItemAt(0).coerceToText(this)?.toString()?.trim().orEmpty()
+            } else {
+                ""
+            }
+
+        sendToWeb(
+            JSONObject()
+                .put("source", "followclean-android")
+                .put("type", "BACKUP_CLIPBOARD")
+                .put("value", text)
         )
     }
 
