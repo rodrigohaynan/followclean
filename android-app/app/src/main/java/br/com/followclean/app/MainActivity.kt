@@ -41,6 +41,7 @@ class MainActivity : Activity() {
     private var currentUsername: String? = null
     private var extractionAttempts = 0
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private var pendingBackupFileContent: String? = null
     private var oauthRedeemAttempts = 0
 
     private val betweenProfilesMs = 12_000L
@@ -126,7 +127,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.14"
+                "FollowCleanAndroid/0.3.15"
         }
 
         CookieManager.getInstance().apply {
@@ -488,6 +489,8 @@ class MainActivity : Activity() {
                 }
                 "GET_SNAPSHOT" -> sendAppSnapshotToWeb()
                 "READ_BACKUP_CLIPBOARD" -> sendBackupFromClipboard()
+                "SAVE_BACKUP_FILE" -> saveBackupFile(json.optString("content"))
+                "OPEN_BACKUP_FILE" -> openBackupFile()
                 "CLOUD_SYNCED" -> markCloudSynced()
                 "START_OAUTH" -> startInstagramOAuth()
                 "PAUSE_BATCH" -> pauseBatch("Pausado pelo usuário.")
@@ -815,7 +818,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.14")
+                .put("version", "0.3.15")
                 .put("snapshotSavedAt", prefs.getString("app_snapshot_saved_at", null))
                 .put("cloudSyncPending", prefs.getBoolean("cloud_sync_pending", false))
                 .put("lastCloudSyncAt", prefs.getString("last_cloud_sync_at", null))
@@ -839,6 +842,40 @@ class MainActivity : Activity() {
                 .put("type", "BACKUP_CLIPBOARD")
                 .put("value", text)
         )
+    }
+
+    private fun saveBackupFile(content: String) {
+        if (content.isBlank()) {
+            sendToWeb(
+                JSONObject()
+                    .put("source", "followclean-android")
+                    .put("type", "BACKUP_FILE_SAVED")
+                    .put("ok", false)
+                    .put("message", "Não há conteúdo de backup para salvar.")
+            )
+            return
+        }
+
+        pendingBackupFileContent = content
+        val date = Instant.now().toString().substringBefore("T")
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TITLE, "FollowClean-backup-$date.fcb")
+        }
+        startActivityForResult(intent, BACKUP_SAVE_REQUEST)
+    }
+
+    private fun openBackupFile() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf("text/plain", "application/octet-stream")
+            )
+        }
+        startActivityForResult(intent, BACKUP_OPEN_REQUEST)
     }
 
     private fun saveAppSnapshot(input: JSONObject) {
@@ -1081,6 +1118,59 @@ class MainActivity : Activity() {
             filePathCallback = null
             return
         }
+
+        if (requestCode == BACKUP_SAVE_REQUEST) {
+            val uri = data?.data
+            val content = pendingBackupFileContent
+            pendingBackupFileContent = null
+
+            if (resultCode == RESULT_OK && uri != null && !content.isNullOrBlank()) {
+                val result = runCatching {
+                    contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use {
+                        it.write(content)
+                    } ?: error("Não foi possível abrir o arquivo para escrita.")
+                }
+
+                sendToWeb(
+                    JSONObject()
+                        .put("source", "followclean-android")
+                        .put("type", "BACKUP_FILE_SAVED")
+                        .put("ok", result.isSuccess)
+                        .put(
+                            "message",
+                            if (result.isSuccess) "Backup salvo em arquivo com sucesso."
+                            else "Não foi possível salvar o arquivo de backup."
+                        )
+                )
+            }
+            return
+        }
+
+        if (requestCode == BACKUP_OPEN_REQUEST) {
+            val uri = data?.data
+            if (resultCode == RESULT_OK && uri != null) {
+                val result = runCatching {
+                    contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use {
+                        it.readText()
+                    } ?: error("Não foi possível abrir o arquivo.")
+                }
+
+                sendToWeb(
+                    JSONObject()
+                        .put("source", "followclean-android")
+                        .put("type", "BACKUP_FILE_LOADED")
+                        .put("ok", result.isSuccess)
+                        .put("value", result.getOrNull().orEmpty())
+                        .put(
+                            "message",
+                            if (result.isSuccess) "Arquivo de backup carregado."
+                            else "Não foi possível ler o arquivo de backup."
+                        )
+                )
+            }
+            return
+        }
+
         super.onActivityResult(requestCode, resultCode, data)
     }
 
@@ -1101,6 +1191,8 @@ class MainActivity : Activity() {
 
     companion object {
         private const val FILE_CHOOSER_REQUEST = 9012
+        private const val BACKUP_SAVE_REQUEST = 9013
+        private const val BACKUP_OPEN_REQUEST = 9014
         private val EXTRACT_SCRIPT = """
             (() => {
               function normalizeText(value) {
