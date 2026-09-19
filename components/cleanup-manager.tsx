@@ -329,6 +329,7 @@ export function CleanupManager() {
           lastMessage?: unknown;
         } | null;
         snapshot?: unknown;
+        value?: unknown;
         savedAt?: unknown;
         snapshotSavedAt?: unknown;
         cloudSyncPending?: unknown;
@@ -382,6 +383,18 @@ export function CleanupManager() {
         if (typeof data.lastCloudSyncAt === "string") {
           setLastCloudSyncAt(data.lastCloudSyncAt);
         }
+        return;
+      }
+
+      if (data.type === "BACKUP_CLIPBOARD" && fromAndroid) {
+        if (typeof data.value !== "string" || !data.value.trim()) {
+          setExtensionNote(
+            "Nenhum backup encontrado na área de transferência. Copie novamente o código FCBACKUP1: e tente restaurar.",
+          );
+          return;
+        }
+
+        void restoreBackupValue(data.value);
         return;
       }
 
@@ -1102,14 +1115,15 @@ export function CleanupManager() {
     }
   }
 
-  async function restorePortableBackup() {
-    const raw = window.prompt(
-      "Cole aqui o código de backup do FollowClean (começa com FCBACKUP1:).",
-    );
-    if (!raw) return;
-
+  async function restoreBackupValue(raw: string) {
     try {
       const backup = decodeFollowCleanBackup(raw);
+
+      let restoredLatest: StoredAnalysis | null = null;
+      let restoredProtected: ProtectedProfile[] = [];
+      let restoredSettings = settings;
+      let restoredMetadata: ProfileMetadata[] = [];
+      let restoredFailures: UnavailableProfile[] = [];
 
       if (backup.latest && typeof backup.latest === "object") {
         const record = backup.latest as StoredAnalysis;
@@ -1120,12 +1134,12 @@ export function CleanupManager() {
           record.analysis
         ) {
           await restoreAnalysisSnapshot(record);
+          restoredLatest = record;
           setLatest(record);
         }
       }
 
       if (Array.isArray(backup.protectedProfiles)) {
-        const restoredProtected: ProtectedProfile[] = [];
         for (const item of backup.protectedProfiles) {
           if (!item || typeof item !== "object") continue;
           const row = item as Record<string, unknown>;
@@ -1136,14 +1150,15 @@ export function CleanupManager() {
           );
           restoredProtected.push(restored);
         }
-        setProtectedProfiles(restoredProtected.sort((a, b) =>
+        restoredProtected = restoredProtected.sort((a, b) =>
           a.username.localeCompare(b.username),
-        ));
+        );
+        setProtectedProfiles(restoredProtected);
       }
 
       if (backup.settings && typeof backup.settings === "object") {
         const rawSettings = backup.settings as Record<string, unknown>;
-        const restoredSettings: CleanupSettings = {
+        restoredSettings = {
           notFollowingBack:
             typeof rawSettings.notFollowingBack === "boolean"
               ? rawSettings.notFollowingBack
@@ -1158,7 +1173,7 @@ export function CleanupManager() {
       }
 
       if (Array.isArray(backup.profileMetadata)) {
-        const restoredMetadata: ProfileMetadata[] =
+        restoredMetadata =
           backup.profileMetadata.flatMap((item: unknown) => {
             if (!item || typeof item !== "object") return [];
             const row = item as Record<string, unknown>;
@@ -1195,7 +1210,7 @@ export function CleanupManager() {
       }
 
       if (Array.isArray(backup.failures)) {
-        const restoredFailures: UnavailableProfile[] =
+        restoredFailures =
           backup.failures.flatMap((item: unknown) => {
             if (!item || typeof item !== "object") return [];
             const row = item as Record<string, unknown>;
@@ -1217,11 +1232,49 @@ export function CleanupManager() {
         setExtensionFailures(restoredFailures);
       }
 
-      window.setTimeout(() => saveProgressToAppMemory(), 250);
-      setExtensionNote("Backup restaurado com sucesso neste aparelho.");
+      // Salva imediatamente a cópia restaurada na memória nativa usando os
+      // valores já restaurados, sem depender do próximo render do React.
+      if (androidReady && restoredLatest && androidBridge()?.postMessage) {
+        androidBridge()?.postMessage(
+          JSON.stringify({
+            type: "SAVE_SNAPSHOT",
+            snapshot: {
+              latest: restoredLatest,
+              protectedProfiles: restoredProtected,
+              settings: restoredSettings,
+              profileMetadata: restoredMetadata,
+              failures: restoredFailures,
+            },
+          }),
+        );
+      }
+
+      setExtensionNote(
+        restoredLatest
+          ? "Backup restaurado com sucesso. As listas e o progresso foram recuperados."
+          : "O backup foi lido, mas não contém uma análise principal para restaurar.",
+      );
     } catch {
-      setExtensionNote("O código informado não é um backup válido do FollowClean.");
+      setExtensionNote(
+        "Não foi possível restaurar: o código está incompleto ou não é um backup válido do FollowClean.",
+      );
     }
+  }
+
+  async function restorePortableBackup() {
+    if (androidReady && androidBridge()?.postMessage) {
+      setExtensionNote("Lendo o backup da área de transferência...");
+      androidBridge()?.postMessage(
+        JSON.stringify({ type: "READ_BACKUP_CLIPBOARD" }),
+      );
+      return;
+    }
+
+    const raw = window.prompt(
+      "Cole aqui o código de backup do FollowClean (começa com FCBACKUP1:).",
+    );
+    if (!raw) return;
+    await restoreBackupValue(raw);
   }
 
   async function uploadLocalProgressToCloud() {
@@ -1520,7 +1573,7 @@ export function CleanupManager() {
   }
 
   if (loading) return <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">Carregando regras locais...</div>;
-  if (!latest) return <div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><h2 className="mt-4 text-xl font-black text-slate-950">Primeiro faça uma importação</h2><p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">A fila de limpeza usa o snapshot mais recente salvo neste dispositivo.</p><Link href="/importar" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div>;
+  if (!latest) return <div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2><p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">No APK, copie primeiro o código FCBACKUP1: para a área de transferência e toque em Restaurar backup.</p></div>;
 
   const activeList =
     tab === "priority"
