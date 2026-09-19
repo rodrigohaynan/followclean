@@ -335,6 +335,8 @@ export function CleanupManager() {
         } | null;
         snapshot?: unknown;
         value?: unknown;
+        ok?: unknown;
+        message?: unknown;
         savedAt?: unknown;
         snapshotSavedAt?: unknown;
         cloudSyncPending?: unknown;
@@ -388,6 +390,34 @@ export function CleanupManager() {
         if (typeof data.lastCloudSyncAt === "string") {
           setLastCloudSyncAt(data.lastCloudSyncAt);
         }
+        return;
+      }
+
+      if (data.type === "BACKUP_FILE_SAVED" && fromAndroid) {
+        const message =
+          typeof data.message === "string"
+            ? data.message
+            : Boolean(data.ok)
+              ? "Backup salvo em arquivo com sucesso."
+              : "Não foi possível salvar o arquivo de backup.";
+        setExtensionNote(message);
+        return;
+      }
+
+      if (data.type === "BACKUP_FILE_LOADED" && fromAndroid) {
+        if (!Boolean(data.ok) || typeof data.value !== "string" || !data.value.trim()) {
+          setExtensionNote(
+            typeof data.message === "string"
+              ? data.message
+              : "Não foi possível ler o arquivo de backup.",
+          );
+          return;
+        }
+
+        setRestoreBackupInput(data.value);
+        setRestoreBackupOpen(true);
+        setRestoreBackupStatus("Arquivo carregado. Toque em Restaurar agora.");
+        setExtensionNote("Arquivo de backup carregado.");
         return;
       }
 
@@ -1085,6 +1115,63 @@ export function CleanupManager() {
     return true;
   }
 
+  async function savePortableBackupFile() {
+    if (!latest) {
+      setExtensionNote("Não há progresso para salvar.");
+      return;
+    }
+
+    const backup = encodeFollowCleanBackup({
+      latest,
+      protectedProfiles,
+      settings,
+      profileMetadata,
+      failures: extensionFailures,
+    });
+
+    if (androidReady && androidBridge()?.postMessage) {
+      setExtensionNote("Escolha onde salvar o arquivo de backup.");
+      androidBridge()?.postMessage(
+        JSON.stringify({
+          type: "SAVE_BACKUP_FILE",
+          content: backup,
+        }),
+      );
+      return;
+    }
+
+    const blob = new Blob([backup], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const date = new Date().toISOString().slice(0, 10);
+    anchor.href = url;
+    anchor.download = `FollowClean-backup-${date}.fcb`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setExtensionNote("Arquivo de backup preparado para download.");
+  }
+
+  async function openPortableBackupFile() {
+    if (androidReady && androidBridge()?.postMessage) {
+      setExtensionNote("Escolha o arquivo .fcb do FollowClean.");
+      androidBridge()?.postMessage(JSON.stringify({ type: "OPEN_BACKUP_FILE" }));
+      return;
+    }
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".fcb,text/plain,application/octet-stream";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const value = await file.text();
+      setRestoreBackupInput(value);
+      setRestoreBackupOpen(true);
+      setRestoreBackupStatus("Arquivo carregado. Toque em Restaurar agora.");
+    };
+    input.click();
+  }
+
   async function copyPortableBackup() {
     if (!latest) {
       setExtensionNote("Não há progresso para copiar.");
@@ -1768,18 +1855,33 @@ export function CleanupManager() {
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
+                onClick={() => void savePortableBackupFile()}
+                disabled={!latest}
+                className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Salvar backup em arquivo
+              </button>
+              <button
+                type="button"
+                onClick={() => void openPortableBackupFile()}
+                className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-800"
+              >
+                Restaurar arquivo
+              </button>
+              <button
+                type="button"
                 onClick={() => void copyPortableBackup()}
                 disabled={!latest}
-                className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-800 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Copiar backup
+                Copiar código
               </button>
               <button
                 type="button"
                 onClick={() => void restorePortableBackup()}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700"
               >
-                Restaurar backup
+                Restaurar código
               </button>
             </div>
           </div>
