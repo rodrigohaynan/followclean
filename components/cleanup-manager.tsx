@@ -22,6 +22,7 @@ import {
 import {
   decodeFollowCleanBackup,
   encodeFollowCleanBackup,
+  salvageFollowCleanBackup,
 } from "@/lib/storage/backup";
 import {
   getAnalyses,
@@ -1134,7 +1135,22 @@ export function CleanupManager() {
     setRestoreBackupBusy(true);
     setRestoreBackupStatus("Lendo e restaurando o backup...");
     try {
-      const backup = decodeFollowCleanBackup(value);
+      let backup: Record<string, unknown>;
+      let salvaged = false;
+
+      try {
+        backup = decodeFollowCleanBackup(value);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message.toLowerCase() : "";
+        if (!message.includes("unexpected eof")) throw error;
+
+        setRestoreBackupStatus(
+          "O código está truncado. Tentando recuperar os blocos completos do backup...",
+        );
+        backup = salvageFollowCleanBackup(value);
+        salvaged = true;
+      }
 
       let restoredLatest: StoredAnalysis | null = null;
       let restoredProtected: ProtectedProfile[] = [];
@@ -1267,8 +1283,12 @@ export function CleanupManager() {
       }
 
       const restoredMessage = restoredLatest
-        ? `Backup restaurado com sucesso: ${restoredMetadata.length.toLocaleString("pt-BR")} perfis verificados, ${restoredFailures.length.toLocaleString("pt-BR")} indisponíveis e ${restoredProtected.length.toLocaleString("pt-BR")} protegidos recuperados.`
-        : "O backup foi lido, mas não contém uma análise principal para restaurar.";
+        ? salvaged
+          ? `Backup estava incompleto, mas foi possível recuperar os blocos íntegros: ${restoredMetadata.length.toLocaleString("pt-BR")} perfis verificados, ${restoredFailures.length.toLocaleString("pt-BR")} indisponíveis e ${restoredProtected.length.toLocaleString("pt-BR")} protegidos.`
+          : `Backup restaurado com sucesso: ${restoredMetadata.length.toLocaleString("pt-BR")} perfis verificados, ${restoredFailures.length.toLocaleString("pt-BR")} indisponíveis e ${restoredProtected.length.toLocaleString("pt-BR")} protegidos recuperados.`
+        : salvaged
+          ? "O código está truncado e não foi possível recuperar a análise principal, embora alguns blocos menores tenham sido encontrados."
+          : "O backup foi lido, mas não contém uma análise principal para restaurar.";
 
       setExtensionNote(restoredMessage);
       setRestoreBackupStatus(restoredMessage);
@@ -1650,9 +1670,11 @@ export function CleanupManager() {
 
         {restoreBackupStatus ? (
           <div className={`mt-3 rounded-xl border px-3 py-2 text-sm font-bold leading-5 ${
-            restoreBackupStatus.startsWith("Backup restaurado")
+            restoreBackupStatus.startsWith("Backup restaurado") ||
+            restoreBackupStatus.startsWith("Backup estava incompleto")
               ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : restoreBackupStatus.startsWith("Lendo")
+              : restoreBackupStatus.startsWith("Lendo") ||
+                  restoreBackupStatus.startsWith("O código está truncado")
                 ? "border-blue-200 bg-blue-50 text-blue-800"
                 : "border-red-200 bg-red-50 text-red-800"
           }`}>
