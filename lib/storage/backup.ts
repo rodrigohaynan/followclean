@@ -31,12 +31,22 @@ export function encodeFollowCleanBackup(payload: Record<string, unknown>) {
 }
 
 export function decodeFollowCleanBackup(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith(FOLLOWCLEAN_BACKUP_PREFIX)) {
+  const raw = value.trim();
+
+  // Aceita códigos copiados de notas/mensageiros que possam inserir
+  // aspas, quebras de linha ou espaços no meio do Base64.
+  const prefixIndex = raw.indexOf(FOLLOWCLEAN_BACKUP_PREFIX);
+  if (prefixIndex < 0) {
     throw new Error("Backup do FollowClean inválido.");
   }
 
-  const encoded = trimmed.slice(FOLLOWCLEAN_BACKUP_PREFIX.length);
+  const encoded = raw
+    .slice(prefixIndex + FOLLOWCLEAN_BACKUP_PREFIX.length)
+    .replace(/["'\s]/g, "");
+
+  if (!encoded) {
+    throw new Error("Backup do FollowClean vazio.");
+  }
   const envelope = JSON.parse(
     strFromU8(unzlibSync(base64ToBytes(encoded))),
   ) as {
