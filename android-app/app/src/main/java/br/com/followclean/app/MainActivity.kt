@@ -515,7 +515,7 @@ class MainActivity : Activity() {
             when (json.optString("type")) {
                 "PING" -> sendReadyToWeb()
                 "GET_RESULTS" -> sendResultsToWeb()
-                "RESET_ANDROID_FAILURES" -> resetAndroidFailures()
+                "RESET_ANDROID_FAILURES" -> resetAndroidFailures(json.optJSONArray("usernames"))
                 "SAVE_SNAPSHOT" -> {
                     val snapshot = json.optJSONObject("snapshot")
                     if (snapshot != null) saveAppSnapshot(snapshot)
@@ -834,25 +834,32 @@ class MainActivity : Activity() {
         handler.postDelayed({ processNext() }, betweenProfilesMs)
     }
 
-    private fun resetAndroidFailures() {
+    private fun resetAndroidFailures(requested: JSONArray?) {
         if (running) {
             sendBatchStatus("Pause a verificação antes de revisar os indisponíveis.")
             return
         }
         val oldFailures = readFailures()
-        val cleared = JSONArray()
+        val clearedSet = mutableSetOf<String>()
         val keys = oldFailures.keys()
         while (keys.hasNext()) {
-            cleared.put(keys.next())
+            clearedSet.add(keys.next().lowercase())
         }
-
+        if (requested != null) {
+            for (i in 0 until requested.length().coerceAtMost(20000)) {
+                val username = requested.optString(i).trim().lowercase().removePrefix("@")
+                if (username.matches(Regex("[a-z0-9._]{1,30}"))) {
+                    clearedSet.add(username)
+                }
+            }
+        }
+        val cleared = JSONArray()
+        for (username in clearedSet) cleared.put(username)
         prefs.edit().putString("failures", "{}").apply()
         val snapshotRaw = prefs.getString("app_snapshot", null)
         if (!snapshotRaw.isNullOrBlank()) {
             val snapshot = runCatching { JSONObject(snapshotRaw) }.getOrNull()
             if (snapshot != null) {
-                val clearedSet = mutableSetOf<String>()
-                for (i in 0 until cleared.length()) clearedSet.add(cleared.optString(i))
                 val existing = snapshot.optJSONArray("failures") ?: JSONArray()
                 val retained = JSONArray()
                 for (i in 0 until existing.length()) {
