@@ -105,6 +105,9 @@ export function CleanupManager() {
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchCurrent, setBatchCurrent] = useState<string | null>(null);
   const [batchProcessed, setBatchProcessed] = useState(0);
+  const [bulkReviewArmed, setBulkReviewArmed] = useState(false);
+  const [bulkReviewBusy, setBulkReviewBusy] = useState(false);
+  const [networkPauseNote, setNetworkPauseNote] = useState("");
   const [extensionFailures, setExtensionFailures] = useState<UnavailableProfile[]>([]);
   const [cloudConfigured, setCloudConfigured] = useState(false);
   const [cloudToken, setCloudToken] = useState<string | null>(null);
@@ -334,6 +337,7 @@ export function CleanupManager() {
           lastMessage?: unknown;
         } | null;
         snapshot?: unknown;
+        usernames?: unknown;
         value?: unknown;
         ok?: unknown;
         message?: unknown;
@@ -685,6 +689,28 @@ export function CleanupManager() {
         return;
       }
 
+      if (data.type === "FAILURES_RESET" && fromAndroid) {
+        const names = new Set(
+          Array.isArray(data.usernames)
+            ? data.usernames.filter((value): value is string => typeof value === "string")
+                .map((name) => name.trim().toLowerCase().replace(/^@/, ""))
+            : [],
+        );
+        setExtensionFailures((current) =>
+          current.filter((failure) =>
+            !(failure.source === "android" && names.has(failure.username))
+          ),
+        );
+        setBulkReviewBusy(false);
+        setBulkReviewArmed(false);
+        setTab("review");
+        setInitialFilter("all");
+        setQuery("");
+        const message = `${names.size.toLocaleString("pt-BR")} perfis do Android enviados novamente para Revisar. Conecte-se à internet antes de iniciar outra verificação.`;
+        setExtensionNote(message);
+        return;
+      }
+
       if (data.type === "PROFILE_UNAVAILABLE" && fromAndroid && data.failure) {
         const item = data.failure;
         if (typeof item.username === "string") {
@@ -750,6 +776,17 @@ export function CleanupManager() {
 
       if (data.type === "BATCH_STATUS" && data.batch) {
         setBatchRunning(Boolean(data.batch.running));
+        const statusText =
+          typeof data.batch.lastMessage === "string" ? data.batch.lastMessage : "";
+        if (
+          statusText.includes("Sem acesso à internet") ||
+          statusText.includes("Falha de rede") ||
+          statusText.includes("Instagram respondeu HTTP")
+        ) {
+          setNetworkPauseNote(statusText);
+        } else if (Boolean(data.batch.running)) {
+          setNetworkPauseNote("");
+        }
         setBatchCurrent(
           typeof data.batch.currentUsername === "string"
             ? data.batch.currentUsername
@@ -1520,6 +1557,26 @@ export function CleanupManager() {
     );
   }
 
+  function restoreAndroidUnavailableForReview() {
+    if (!androidReady || batchRunning || bulkReviewBusy) return;
+    const usernames = extensionFailures
+      .filter((entry) => entry.source === "android" && entry.reason !== "deleted_username")
+      .map((entry) => entry.username);
+    if (!usernames.length) {
+      setExtensionNote("Não há falhas do scanner Android para revisar em lote.");
+      setBulkReviewArmed(false);
+      return;
+    }
+    const bridge = androidBridge();
+    if (!bridge?.postMessage) {
+      setExtensionNote("Abra o FollowClean pelo aplicativo Android para revisar esses perfis.");
+      return;
+    }
+    setBulkReviewBusy(true);
+    setExtensionNote("Preparando revisão dos perfis anteriormente classificados pelo Android...");
+    bridge.postMessage(JSON.stringify({ type: "RESET_ANDROID_FAILURES", usernames }));
+  }
+
   async function reviewProfile(username: string) {
     const normalized = username.trim().toLowerCase().replace(/^@/, "");
     if (!normalized) return;
@@ -1835,6 +1892,7 @@ export function CleanupManager() {
             <div className="font-black">{androidReady ? "FollowClean Android · scanner nativo" : "FollowClean Assist · navegador"}</div>
             <p className="mt-1 leading-6">{extensionNote}</p>
             {batchRunning ? <p className="mt-1 text-xs font-black text-emerald-800">Execução contínua · {batchProcessed.toLocaleString("pt-BR")} perfis nesta sessão {batchCurrent ? `· @${batchCurrent}` : ""}</p> : null}
+            {networkPauseNote ? <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs font-black text-amber-900">{networkPauseNote}</p> : null}
             <div className="mt-3 flex flex-wrap gap-2">
               <button type="button" disabled={(!extensionReady && !androidReady) || review.length === 0 || batchRunning} onClick={startAutomaticVerification} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Iniciar verificação contínua</button>
               <button type="button" disabled={(!extensionReady && !androidReady) || !batchRunning} onClick={pauseAutomaticVerification} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800 disabled:cursor-not-allowed disabled:opacity-40">Pausar</button>
@@ -1930,6 +1988,41 @@ export function CleanupManager() {
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar @usuario" className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-400 focus:bg-white" />
             </div>
           </div>
+
+          {tab === "unavailable" && androidReady &&
+            extensionFailures.some((item) => item.source === "android" && item.reason !== "deleted_username") ? (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+              <p className="font-black">Falhas de leitura do Android</p>
+              <p className="mt-1 leading-6">
+                Se o aparelho ficou sem internet, algumas falhas podem ter sido classificadas incorretamente.
+                É possível devolver todos os indisponíveis identificados pelo scanner Android para Revisar,
+                preservando os resultados já verificados, os protegidos e os registros __deleted__ da importação.
+              </p>
+              <p className="mt-1 text-xs font-bold">
+                {extensionFailures.filter((item) => item.source === "android" && item.reason !== "deleted_username").length.toLocaleString("pt-BR")} registros elegíveis · inclui contas realmente indisponíveis, que precisarão ser verificadas novamente.
+              </p>
+              {!bulkReviewArmed ? (
+                <button type="button" onClick={() => setBulkReviewArmed(true)}
+                  disabled={batchRunning || bulkReviewBusy}
+                  className="mt-3 rounded-lg border border-amber-400 bg-white px-3 py-2 text-xs font-black text-amber-900 disabled:opacity-40">
+                  Preparar revisão em lote
+                </button>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" disabled={batchRunning || bulkReviewBusy}
+                    onClick={restoreAndroidUnavailableForReview}
+                    className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-black text-white disabled:opacity-40">
+                    {bulkReviewBusy ? "Preparando..." : "Confirmar: devolver à categoria Revisar"}
+                  </button>
+                  <button type="button" disabled={bulkReviewBusy} onClick={() => setBulkReviewArmed(false)}
+                    className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-black text-amber-900">
+                    Cancelar
+                  </button>
+                </div>
+              )}
+              {batchRunning ? <p className="mt-2 text-xs">Pause a verificação para utilizar a revisão em lote.</p> : null}
+            </div>
+          ) : null}
 
           <div className="mt-4 border-t border-slate-100 pt-4">
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">Ir para inicial</p>
