@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.ClipboardManager
 import android.graphics.Color
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -15,6 +17,8 @@ import android.webkit.CookieManager
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceError
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -127,7 +131,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.15"
+                "FollowCleanAndroid/0.3.16"
         }
 
         CookieManager.getInstance().apply {
@@ -463,9 +467,37 @@ class MainActivity : Activity() {
                 return !(host == "www.instagram.com" || host == "instagram.com")
             }
 
+            override fun onReceivedError(
+                view: WebView,
+                request: WebResourceRequest,
+                error: WebResourceError
+            ) {
+                super.onReceivedError(view, request, error)
+                if (running && request.isForMainFrame) {
+                    pauseBatch("Falha de rede ao abrir o Instagram. Verificação pausada; perfil atual preservado para nova tentativa.")
+                }
+            }
+
+            override fun onReceivedHttpError(
+                view: WebView,
+                request: WebResourceRequest,
+                response: WebResourceResponse
+            ) {
+                super.onReceivedHttpError(view, request, response)
+                if (running && request.isForMainFrame &&
+                    (response.statusCode == 429 || response.statusCode >= 500)
+                ) {
+                    pauseBatch("Instagram respondeu HTTP ${response.statusCode}. Verificação pausada sem classificar o perfil.")
+                }
+            }
+
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
                 if (!running) return
+                if (!hasValidatedInternet()) {
+                    pauseForConnection()
+                    return
+                }
 
                 if (isChallengeUrl(url)) {
                     pauseBatch("Instagram solicitou login/verificação. Lote pausado.")
@@ -483,6 +515,7 @@ class MainActivity : Activity() {
             when (json.optString("type")) {
                 "PING" -> sendReadyToWeb()
                 "GET_RESULTS" -> sendResultsToWeb()
+                "RESET_ANDROID_FAILURES" -> resetAndroidFailures()
                 "SAVE_SNAPSHOT" -> {
                     val snapshot = json.optJSONObject("snapshot")
                     if (snapshot != null) saveAppSnapshot(snapshot)
@@ -639,8 +672,27 @@ class MainActivity : Activity() {
         sendResultsToWeb()
     }
 
+    private fun hasValidatedInternet(): Boolean {
+        val connectivity = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val active = connectivity.activeNetwork ?: return false
+        val capabilities = connectivity.getNetworkCapabilities(active) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
+    private fun pauseForConnection() {
+        if (running) {
+            pauseBatch("Sem acesso à internet. Verificação pausada; nenhum perfil foi marcado como indisponível por esta falha.")
+        }
+    }
+
     private fun processNext() {
         if (!running) return
+        if (!hasValidatedInternet()) {
+            pauseForConnection()
+            return
+        }
 
         val results = readResults()
         while (currentIndex < queue.size && results.has(queue[currentIndex])) {
@@ -667,9 +719,18 @@ class MainActivity : Activity() {
 
     private fun extractFollowers() {
         if (!running) return
+        if (!hasValidatedInternet()) {
+            pauseForConnection()
+            return
+        }
         val expected = currentUsername ?: return
 
         scannerWebView.evaluateJavascript(EXTRACT_SCRIPT) { raw ->
+            if (!running || currentUsername != expected) return@evaluateJavascript
+            if (!hasValidatedInternet()) {
+                pauseForConnection()
+                return@evaluateJavascript
+            }
             val decoded = decodeJavascriptString(raw)
             val json = runCatching { JSONObject(decoded) }.getOrNull()
 
@@ -736,6 +797,11 @@ class MainActivity : Activity() {
     }
 
     private fun retryOrSkip(username: String) {
+        if (!running || currentUsername != username) return
+        if (!hasValidatedInternet()) {
+            pauseForConnection()
+            return
+        }
         extractionAttempts++
         if (extractionAttempts < maxExtractionAttempts) {
             val message =
@@ -749,6 +815,10 @@ class MainActivity : Activity() {
             return
         }
 
+        if (!hasValidatedInternet()) {
+            pauseForConnection()
+            return
+        }
         saveFailure(username, "no_response")
         processedThisRun++
         currentIndex++
@@ -762,6 +832,52 @@ class MainActivity : Activity() {
         sendResultsToWeb()
         sendBatchStatus(message)
         handler.postDelayed({ processNext() }, betweenProfilesMs)
+    }
+
+    private fun resetAndroidFailures() {
+        if (running) {
+            sendBatchStatus("Pause a verificação antes de revisar os indisponíveis.")
+            return
+        }
+        val oldFailures = readFailures()
+        val cleared = JSONArray()
+        val keys = oldFailures.keys()
+        while (keys.hasNext()) {
+            cleared.put(keys.next())
+        }
+
+        prefs.edit().putString("failures", "{}").apply()
+        val snapshotRaw = prefs.getString("app_snapshot", null)
+        if (!snapshotRaw.isNullOrBlank()) {
+            val snapshot = runCatching { JSONObject(snapshotRaw) }.getOrNull()
+            if (snapshot != null) {
+                val clearedSet = mutableSetOf<String>()
+                for (i in 0 until cleared.length()) clearedSet.add(cleared.optString(i))
+                val existing = snapshot.optJSONArray("failures") ?: JSONArray()
+                val retained = JSONArray()
+                for (i in 0 until existing.length()) {
+                    val item = existing.optJSONObject(i) ?: continue
+                    if (item.optString("username").lowercase() !in clearedSet) retained.put(item)
+                }
+                snapshot.put("failures", retained)
+                snapshot.put("nativeFailures", JSONObject())
+                snapshot.put("savedAt", Instant.now().toString())
+                prefs.edit()
+                    .putString("app_snapshot", snapshot.toString())
+                    .putBoolean("cloud_sync_pending", true)
+                    .apply()
+            }
+        }
+
+        sendToWeb(
+            JSONObject()
+                .put("source", "followclean-android")
+                .put("type", "FAILURES_RESET")
+                .put("usernames", cleared)
+                .put("batch", batchJson())
+        )
+        sendResultsToWeb()
+        updateStatus("${cleared.length()} registros voltaram para Revisar.")
     }
 
     private fun saveResult(username: String, followersCount: Long) {
@@ -818,7 +934,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.15")
+                .put("version", "0.3.16")
                 .put("snapshotSavedAt", prefs.getString("app_snapshot_saved_at", null))
                 .put("cloudSyncPending", prefs.getBoolean("cloud_sync_pending", false))
                 .put("lastCloudSyncAt", prefs.getString("last_cloud_sync_at", null))
