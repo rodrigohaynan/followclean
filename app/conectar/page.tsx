@@ -41,35 +41,35 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
   const message = params.status ? statusMessages[params.status] : undefined;
 
   return (
-    <main className="min-h-screen pb-16">
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <Link href="/" className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm"><UsersRound size={21} /></div>
-          <div><p className="text-lg font-black tracking-tight">FollowClean</p><p className="text-xs text-slate-500">Conexão oficial Meta</p></div>
+    <main className="min-h-screen pb-8 sm:pb-16">
+      <header className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:flex-nowrap sm:px-6 sm:py-6">
+        <Link href="/" className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+          <div className="flex h-9 w-9 shrink-0 sm:h-10 sm:w-10 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm"><UsersRound size={21} /></div>
+          <div><p className="text-base font-black tracking-tight sm:text-lg">FollowClean</p><p className="text-[11px] text-slate-500 sm:text-xs">Conexão oficial Meta</p></div>
         </Link>
         <div className="flex items-center gap-2">
           {session ? (
-            <Link href="/limpeza" className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm">
+            <Link href="/limpeza" className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-slate-950 px-3 py-2 text-sm font-semibold text-white shadow-sm sm:px-4">
               <ShieldCheck size={16} /> Limpeza
             </Link>
           ) : null}
-          <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm">
+          <Link href="/dashboard" className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm sm:px-4">
             <ArrowLeft size={16} /> Dashboard
           </Link>
         </div>
       </header>
 
-      <section className="mx-auto max-w-5xl px-6 pt-8">
-        <div className="mb-8">
+      <section className="mx-auto max-w-5xl px-4 pt-4 sm:px-6 sm:pt-8">
+        <div className="mb-4 sm:mb-8">
           <p className="text-sm font-bold uppercase tracking-[0.16em] text-pink-600">Instagram</p>
-          <h1 className="mt-2 text-4xl font-black tracking-[-0.035em] text-slate-950">Conectar sua conta com segurança</h1>
-          <p className="mt-3 max-w-3xl leading-7 text-slate-600">O FollowClean usa o login oficial da Meta. Sua senha não passa pelo nosso site e o token de acesso fica protegido em um cookie criptografado.</p>
+          <h1 className="mt-1.5 text-[clamp(1.5rem,6vw,2.25rem)] font-black leading-tight tracking-[-0.035em] text-slate-950 sm:mt-2 sm:text-4xl">Conectar sua conta com segurança</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 sm:mt-3 sm:text-base sm:leading-7">O FollowClean usa o login oficial da Meta. Sua senha não passa pelo nosso site e o token de acesso fica protegido em um cookie criptografado.</p>
         </div>
 
         {message ? <div className={`mb-6 rounded-2xl border p-4 text-sm font-semibold ${message.tone}`}>{message.text}</div> : null}
 
         {session ? (
-          <section className="rounded-[2rem] border border-emerald-200 bg-white p-6 shadow-sm md:p-8">
+          <section className="rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6 md:p-8">
             <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700"><CheckCircle2 size={15} /> Conectado</div>
@@ -89,7 +89,7 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
             </div>
           </section>
         ) : (
-          <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6 md:p-8">
             <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
               <div className="max-w-2xl">
                 <div className="flex items-center gap-3"><div className="rounded-2xl bg-gradient-to-br from-purple-600 via-pink-600 to-orange-500 p-3 text-white"><Camera size={25} /></div><div><h2 className="text-xl font-black text-slate-950">Instagram Login</h2><p className="text-sm text-slate-500">OAuth oficial da Meta</p></div></div>
@@ -100,7 +100,7 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
           </section>
         )}
 
-        <section className="mt-6 grid gap-4 md:grid-cols-3">
+        <section className="mt-3 grid gap-3 sm:mt-6 sm:gap-4 md:grid-cols-3">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><LockKeyhole className="text-blue-600" size={21} /><h3 className="mt-3 font-black text-slate-950">Sem senha no FollowClean</h3><p className="mt-2 text-sm leading-6 text-slate-500">A autenticação acontece diretamente no Instagram.</p></div>
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><ShieldCheck className="text-emerald-600" size={21} /><h3 className="mt-3 font-black text-slate-950">Token protegido</h3><p className="mt-2 text-sm leading-6 text-slate-500">A sessão é criptografada antes de ser armazenada no navegador.</p></div>
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><ExternalLink className="text-violet-600" size={21} /><h3 className="mt-3 font-black text-slate-950">Próxima integração</h3><p className="mt-2 text-sm leading-6 text-slate-500">Enriquecimento da fila e extensão assistida para revisão no Instagram.</p></div>
