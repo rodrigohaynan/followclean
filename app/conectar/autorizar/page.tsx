@@ -33,7 +33,7 @@ export default async function AutorizarInstagramPage() {
           <p className="mt-3 text-sm leading-6 text-slate-600">
             Volte e inicie a conexão novamente para gerar uma autorização segura.
           </p>
-          <Link href="/conectar" className="mt-6 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-black text-white">
+          <Link href="/conectar" className="mt-6 inline-flex rounded-xl fc-dark-action bg-slate-950 px-5 py-3 text-sm font-black text-white">
             Voltar para conectar
           </Link>
         </section>
@@ -63,7 +63,7 @@ export default async function AutorizarInstagramPage() {
 
         <a
           href={chromeIntent}
-          className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3.5 font-black text-white"
+          className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl fc-dark-action bg-slate-950 px-5 py-3.5 font-black text-white"
         >
           <ExternalLink size={19} /> Continuar no Chrome
         </a>

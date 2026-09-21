@@ -15,7 +15,7 @@ export default function DashboardPage() {
         </Link>
         <nav aria-label="Navegação do painel" className="flex shrink-0 items-center gap-2">
           <Link href="/conectar" className="hidden min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm md:inline-flex"><Camera size={16} /> Instagram</Link>
-          <Link href="/limpeza" aria-label="Abrir limpeza" title="Limpeza" className="inline-flex h-10 w-10 items-center justify-center gap-2 rounded-xl bg-slate-950 text-sm font-semibold text-white shadow-sm sm:w-auto sm:px-4"><ShieldCheck size={17} /><span className="hidden sm:inline">Limpeza</span></Link>
+          <Link href="/limpeza" aria-label="Abrir limpeza" title="Limpeza" className="inline-flex h-10 w-10 items-center justify-center gap-2 rounded-xl fc-dark-action bg-slate-950 text-sm font-semibold text-white shadow-sm sm:w-auto sm:px-4"><ShieldCheck size={17} /><span className="hidden sm:inline">Limpeza</span></Link>
           <Link href="/" aria-label="Voltar ao início" title="Início" className="inline-flex h-10 w-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold shadow-sm sm:w-auto sm:px-4"><House size={17} className="sm:hidden" /><ArrowLeft size={16} className="hidden sm:block" /><span className="hidden sm:inline">Início</span></Link>
         </nav>
       </header>

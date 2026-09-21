@@ -27,6 +27,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import org.json.JSONArray
@@ -172,7 +173,13 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.17"
+                "FollowCleanAndroid/0.3.18"
+        }
+
+        // O APK usa um tema claro. Evita que o Android/WebView aplique
+        // escurecimento algorítmico no site e altere as cores dos botões.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(mainWebView.settings, false)
         }
 
         CookieManager.getInstance().apply {
@@ -982,7 +989,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.17")
+                .put("version", "0.3.18")
                 .put("snapshotSavedAt", prefs.getString("app_snapshot_saved_at", null))
                 .put("cloudSyncPending", prefs.getBoolean("cloud_sync_pending", false))
                 .put("lastCloudSyncAt", prefs.getString("last_cloud_sync_at", null))

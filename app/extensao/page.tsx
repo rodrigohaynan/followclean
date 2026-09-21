@@ -73,7 +73,7 @@ export default function ExtensaoPage() {
               href="https://github.com/rodrigohaynan/followclean/archive/refs/heads/main.zip"
               target="_blank"
               rel="noreferrer"
-              className="mt-6 inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-black text-white"
+              className="mt-6 inline-flex items-center gap-2 rounded-xl fc-dark-action bg-slate-950 px-5 py-3 text-sm font-black text-white"
             >
               <Download size={17} /> Baixar projeto
             </a>

@@ -37,7 +37,7 @@ export default async function ExclusaoDadosPage({
         </p>
         <Link
           href="/"
-          className="mt-7 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-black text-white"
+          className="mt-7 inline-flex rounded-xl fc-dark-action bg-slate-950 px-5 py-3 text-sm font-black text-white"
         >
           Voltar ao FollowClean
         </Link>

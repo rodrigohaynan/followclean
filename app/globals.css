@@ -10,6 +10,7 @@
   --brand-dark: #1d4ed8;
   --success: #067647;
   --danger: #b42318;
+  color-scheme: light;
 }
 
 * {
@@ -34,9 +35,36 @@ input {
   font: inherit;
 }
 
+/* Tailwind v4 places utilities in a CSS layer. An unlayered
+   a { color: inherit } overrides text-white on dark links in Android WebView. */
 a {
-  color: inherit;
   text-decoration: none;
+}
+
+/* Keep actionable dark surfaces readable in the APK even if the
+   embedded browser supplies additional link/visited-state styling. */
+.fc-dark-action,
+.fc-dark-action:visited {
+  background-color: #020617 !important;
+  color: #ffffff !important;
+}
+
+.fc-dark-action svg {
+  color: #ffffff !important;
+  stroke: currentColor;
+}
+
+.fc-dark-action:hover {
+  background-color: #0f172a !important;
+}
+
+.fc-dark-action:active {
+  background-color: #1e293b !important;
+}
+
+.fc-dark-action:disabled,
+.fc-dark-action[aria-disabled="true"] {
+  opacity: 0.5;
 }
 
 ::selection {
