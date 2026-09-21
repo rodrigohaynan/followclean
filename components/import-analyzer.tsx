@@ -56,20 +56,20 @@ export function ImportAnalyzer() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm md:p-8">
-        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+    <div className="space-y-3 sm:space-y-6">
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6 md:p-8">
+        <div className="flex flex-col gap-4 sm:gap-6 md:flex-row md:items-center md:justify-between">
           <div className="max-w-xl">
             <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
               <ShieldCheck size={15} /> Processamento e histórico locais
             </div>
-            <h2 className="text-2xl font-black tracking-tight text-slate-950">Importe o arquivo do Instagram</h2>
-            <p className="mt-2 leading-7 text-slate-600">
+            <h2 className="text-xl font-black tracking-tight text-slate-950 sm:text-2xl">Importe o arquivo do Instagram</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600 sm:text-base sm:leading-7">
               O ZIP é processado no seu navegador. O resultado fica salvo neste dispositivo para comparações futuras.
             </p>
           </div>
 
-          <label className="group flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-8 py-5 text-center transition hover:border-blue-400 hover:bg-blue-50/50 md:min-w-80">
+          <label className="group flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-center sm:min-h-32 sm:px-8 sm:py-5 transition hover:border-blue-400 hover:bg-blue-50/50 md:min-w-80">
             <input
               type="file"
               accept=".zip,application/zip"
@@ -99,23 +99,23 @@ export function ImportAnalyzer() {
 
       {analysis ? (
         <>
-          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <section className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-4">
             {[
               ["Seguidores", analysis.totals.followers, "Total encontrado"],
               ["Seguindo", analysis.totals.following, "Contas seguidas"],
               ["Recíprocos", analysis.totals.mutual, "Seguem de volta"],
               ["Não seguem você", analysis.totals.notFollowingBack, "Candidatos à revisão"],
             ].map(([label, value, detail]) => (
-              <div key={String(label)} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-sm font-semibold text-slate-500">{label}</p>
-                <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">{Number(value).toLocaleString("pt-BR")}</p>
+              <div key={String(label)} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
+                <p className="text-xs font-semibold text-slate-500 sm:text-sm">{label}</p>
+                <p className="mt-1 text-2xl font-black tracking-tight text-slate-950 sm:mt-2 sm:text-3xl">{Number(value).toLocaleString("pt-BR")}</p>
                 <p className="mt-1 text-xs text-slate-400">{detail}</p>
               </div>
             ))}
           </section>
 
-          <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-col gap-4 border-b border-slate-200 p-6 md:flex-row md:items-center md:justify-between">
+          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:rounded-[2rem]">
+            <div className="flex flex-col gap-4 border-b border-slate-200 p-3 sm:p-6 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-3">
                 <div className="rounded-xl bg-red-50 p-2.5 text-red-600"><UsersRound size={20} /></div>
                 <div>
@@ -136,7 +136,7 @@ export function ImportAnalyzer() {
 
             <div className="max-h-[32rem] divide-y divide-slate-100 overflow-auto">
               {filtered.slice(0, 500).map((username) => (
-                <div key={username} className="flex items-center justify-between gap-4 px-6 py-4">
+                <div key={username} className="flex items-center justify-between gap-2 px-3 py-3 sm:gap-4 sm:px-6 sm:py-4">
                   <div className="min-w-0">
                     <p className="truncate font-bold text-slate-900">@{username}</p>
                     <p className="mt-0.5 text-xs text-slate-500">Não encontrado na lista de seguidores</p>
@@ -154,7 +154,7 @@ export function ImportAnalyzer() {
           </section>
         </>
       ) : (
-        <section className="rounded-[2rem] border border-slate-200 bg-white p-8 text-center shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 text-center shadow-sm sm:rounded-[2rem] sm:p-8">
           <FileArchive className="mx-auto text-slate-300" size={36} />
           <p className="mt-4 font-bold text-slate-700">Nenhuma análise carregada</p>
           <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500">

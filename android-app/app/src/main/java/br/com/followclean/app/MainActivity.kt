@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Intent
 import android.content.ClipboardManager
 import android.graphics.Color
+import android.text.TextUtils
 import android.net.Uri
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -12,7 +13,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.webkit.CookieManager
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -34,6 +37,8 @@ class MainActivity : Activity() {
     private lateinit var mainWebView: WebView
     private lateinit var scannerWebView: WebView
     private lateinit var statusView: TextView
+    private var lastStatusMessage = "Pronto"
+    private var statusExpanded = false
 
     private val handler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences("followclean_android", MODE_PRIVATE) }
@@ -56,12 +61,31 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Android 15 desenha a atividade atrás das barras do sistema por padrão.
+        // O conteúdo e a faixa de status recebem os insets para não sobrepor relógio,
+        // câmera frontal ou área de gestos do aparelho.
+        window.statusBarColor = Color.rgb(246, 248, 251)
+        window.navigationBarColor = Color.rgb(246, 248, 251)
+        window.decorView.systemUiVisibility =
+            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+
+        val density = resources.displayMetrics.density
         statusView = TextView(this).apply {
             setBackgroundColor(Color.rgb(15, 23, 42))
             setTextColor(Color.WHITE)
-            textSize = 12f
-            setPadding(24, 12, 24, 12)
-            text = "FollowClean Android · pronto"
+            textSize = 11f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            minHeight = (34 * density).toInt()
+            setPadding((12 * density).toInt(), (7 * density).toInt(), (12 * density).toInt(), (7 * density).toInt())
+            text = "FollowClean · pronto"
+            contentDescription = "FollowClean Android · pronto. Toque para expandir os detalhes."
+            setOnClickListener {
+                statusExpanded = !statusExpanded
+                maxLines = if (statusExpanded) 4 else 1
+                text = if (statusExpanded) "FollowClean Android · $lastStatusMessage"
+                    else compactStatus(lastStatusMessage)
+            }
         }
 
         mainWebView = WebView(this)
@@ -71,6 +95,23 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(246, 248, 251))
+            setOnApplyWindowInsetsListener { view, insets ->
+                val top = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    insets.getInsets(WindowInsets.Type.statusBars()).top
+                } else {
+                    @Suppress("DEPRECATION")
+                    insets.systemWindowInsetTop
+                }
+                val bottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    insets.getInsets(WindowInsets.Type.navigationBars()).bottom
+                } else {
+                    @Suppress("DEPRECATION")
+                    insets.systemWindowInsetBottom
+                }
+                view.setPadding(0, top, 0, bottom)
+                insets
+            }
             addView(
                 statusView,
                 LinearLayout.LayoutParams(
@@ -131,7 +172,7 @@ class MainActivity : Activity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanAndroid/0.3.16"
+                "FollowCleanAndroid/0.3.17"
         }
 
         CookieManager.getInstance().apply {
@@ -941,7 +982,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.16")
+                .put("version", "0.3.17")
                 .put("snapshotSavedAt", prefs.getString("app_snapshot_saved_at", null))
                 .put("cloudSyncPending", prefs.getBoolean("cloud_sync_pending", false))
                 .put("lastCloudSyncAt", prefs.getString("last_cloud_sync_at", null))
@@ -1179,8 +1220,22 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun compactStatus(message: String): String {
+        if (message.startsWith("Não houve resposta utilizável em @")) {
+            val username = Regex("@[a-zA-Z0-9._]+").find(message)?.value.orEmpty()
+            return "$username → Indisponíveis · toque para detalhes"
+        }
+        return "FollowClean · $message"
+    }
+
     private fun updateStatus(message: String) {
-        statusView.post { statusView.text = "FollowClean Android · $message" }
+        statusView.post {
+            lastStatusMessage = message
+            statusExpanded = false
+            statusView.maxLines = 1
+            statusView.text = compactStatus(message)
+            statusView.contentDescription = "FollowClean Android · $message. Toque para expandir os detalhes."
+        }
     }
 
     private fun persistState() {
