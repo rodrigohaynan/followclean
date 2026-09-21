@@ -76,6 +76,23 @@ function matchesInitial(username: string, filter: InitialFilter) {
   return first === filter;
 }
 
+function verificationTime(value?: string): number {
+  if (!value) return 0;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+/** "Todos" mostra as verificações mais recentes sem alterar a ordem dos filtros alfabéticos. */
+function newestFirst<T extends { username: string }>(
+  items: T[],
+  timestampFor: (item: T) => string | undefined,
+): T[] {
+  return [...items].sort((a, b) =>
+    verificationTime(timestampFor(b)) - verificationTime(timestampFor(a)) ||
+    a.username.localeCompare(b.username),
+  );
+}
+
 function unavailableReasonLabel(reason: string) {
   if (reason === "deleted_username") {
     return "Registro __deleted__: conta removida/desativada no arquivo do Instagram";
@@ -1062,39 +1079,62 @@ export function CleanupManager() {
     [queue, unavailableSet],
   );
   const normalizedQuery = query.trim().toLowerCase().replace(/^@/, "");
+  // O histórico salvo já contém updatedAt de cada perfil verificado.
+  // Perfis sem verificação ficam no fim quando a inicial selecionada é "Todos".
+  const verificationDates = useMemo(
+    () => new Map(profileMetadata.map((item) => [
+      item.username.toLowerCase(), item.updatedAt,
+    ] as const)),
+    [profileMetadata],
+  );
+  const sortAllByVerification = <T extends { username: string }>(items: T[]) =>
+    initialFilter === "all"
+      ? newestFirst(items, (item) => verificationDates.get(item.username.toLowerCase()))
+      : items;
+
   const filteredPriority = useMemo(
-    () => priority.filter((item) =>
+    () => sortAllByVerification(priority.filter((item) =>
       matchesInitial(item.username, initialFilter) &&
       (!normalizedQuery || item.username.includes(normalizedQuery))
-    ),
-    [priority, normalizedQuery, initialFilter],
+    )),
+    [priority, normalizedQuery, initialFilter, verificationDates],
   );
   const filteredReview = useMemo(
-    () => review.filter((item) =>
+    () => sortAllByVerification(review.filter((item) =>
       matchesInitial(item.username, initialFilter) &&
       (!normalizedQuery || item.username.includes(normalizedQuery))
-    ),
-    [review, normalizedQuery, initialFilter],
+    )),
+    [review, normalizedQuery, initialFilter, verificationDates],
   );
   const filteredAboveLimit = useMemo(
-    () => aboveLimit.filter((item) =>
+    () => sortAllByVerification(aboveLimit.filter((item) =>
       matchesInitial(item.username, initialFilter) &&
       (!normalizedQuery || item.username.includes(normalizedQuery))
-    ),
-    [aboveLimit, normalizedQuery, initialFilter],
+    )),
+    [aboveLimit, normalizedQuery, initialFilter, verificationDates],
   );
   const filteredProtected = useMemo(
-    () => protectedProfiles.filter((item) =>
-      matchesInitial(item.username, initialFilter) &&
-      (!normalizedQuery || item.username.includes(normalizedQuery))
-    ),
-    [protectedProfiles, normalizedQuery, initialFilter],
+    () => {
+      const items = protectedProfiles.filter((item) =>
+        matchesInitial(item.username, initialFilter) &&
+        (!normalizedQuery || item.username.includes(normalizedQuery))
+      );
+      return initialFilter === "all"
+        ? newestFirst(items, (item) => verificationDates.get(item.username.toLowerCase()) ?? item.createdAt)
+        : items;
+    },
+    [protectedProfiles, normalizedQuery, initialFilter, verificationDates],
   );
   const filteredUnavailable = useMemo(
-    () => unavailable.filter((item) =>
-      matchesInitial(item.username, initialFilter) &&
-      (!normalizedQuery || item.username.includes(normalizedQuery))
-    ),
+    () => {
+      const items = unavailable.filter((item) =>
+        matchesInitial(item.username, initialFilter) &&
+        (!normalizedQuery || item.username.includes(normalizedQuery))
+      );
+      return initialFilter === "all"
+        ? newestFirst(items, (item) => item.updatedAt)
+        : items;
+    },
     [unavailable, normalizedQuery, initialFilter],
   );
 
@@ -2025,7 +2065,10 @@ export function CleanupManager() {
           ) : null}
 
           <div className="mt-4 border-t border-slate-100 pt-4">
-            <p className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">Ir para inicial</p>
+            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-1">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">Ir para inicial</p>
+              {initialFilter === "all" ? <p className="text-xs text-slate-500">Verificados: mais recentes primeiro</p> : null}
+            </div>
             <div className="overflow-x-auto pb-1">
               <div className="flex min-w-max gap-1.5">
                 <button
