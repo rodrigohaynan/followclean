@@ -38,7 +38,7 @@ export default function Home() {
 
           <div className="mt-5 flex flex-wrap gap-2 sm:mt-8 sm:gap-3">
             <Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white shadow-lg shadow-blue-600/15 transition hover:bg-blue-700">Analisar meu arquivo <ArrowRight size={18} /></Link>
-            <Link href="/conectar" className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white"><Camera size={18} /> Conectar Instagram</Link>
+            <Link href="/conectar" className="inline-flex items-center gap-2 rounded-xl fc-dark-action bg-slate-950 px-5 py-3 font-bold text-white"><Camera size={18} /> Conectar Instagram</Link>
             <span className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-600"><ShieldCheck size={18} className="text-emerald-600" /> Sem pedir sua senha</span>
           </div>
 
