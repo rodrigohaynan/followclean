@@ -49,7 +49,7 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
         </Link>
         <div className="flex items-center gap-2">
           {session ? (
-            <Link href="/limpeza" className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-slate-950 px-3 py-2 text-sm font-semibold text-white shadow-sm sm:px-4">
+            <Link href="/limpeza" className="inline-flex min-h-10 items-center gap-2 rounded-xl fc-dark-action bg-slate-950 px-3 py-2 text-sm font-semibold text-white shadow-sm sm:px-4">
               <ShieldCheck size={16} /> Limpeza
             </Link>
           ) : null}
@@ -81,7 +81,7 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Link href="/limpeza" className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-black text-white">
+                <Link href="/limpeza" className="inline-flex items-center gap-2 rounded-xl fc-dark-action bg-slate-950 px-4 py-3 text-sm font-black text-white">
                   <ShieldCheck size={17} /> Ir para Limpeza
                 </Link>
                 <form action="/api/instagram/disconnect" method="post"><button type="submit" className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-black text-red-700"><Unplug size={17} /> Desconectar</button></form>
