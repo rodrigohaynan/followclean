@@ -1837,7 +1837,7 @@ export function CleanupManager() {
   async function startAutomaticVerification() {
     const usernames = pendingCountChecks.map((item) => item.username);
     if (!usernames.length) {
-      setExtensionNote("As contagens já foram verificadas. Confira a reciprocidade manualmente nos perfis pendentes.");
+      setExtensionNote("Não há contagens pendentes. Use Revisar todos na seção desejada para atualizar contagens já lidas.");
       return;
     }
 
@@ -2116,7 +2116,7 @@ export function CleanupManager() {
         <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-blue-700">Acima do limite</p><p className="mt-2 text-3xl font-black text-blue-950">{aboveLimit.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-blue-700/70">Não segue + mais de {settings.maxFollowers.toLocaleString("pt-BR")}</p></div>
         <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-slate-500">Protegidos</p><p className="mt-2 text-3xl font-black text-slate-950">{protectedProfiles.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-slate-400">Nunca entram na fila</p></div>
         <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-violet-700">Indisponíveis</p><p className="mt-2 text-3xl font-black text-violet-950">{unavailable.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-violet-700/70">Removidos da fila principal</p></div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-slate-500">Possíveis não seguidores</p><p className="mt-2 text-3xl font-black text-slate-950">{latest.analysis.totals.notFollowingBack.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-slate-400">Na exportação; segunda conferência necessária</p></div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-slate-500">Possíveis não seguidores</p><p className="mt-2 text-3xl font-black text-slate-950">{latest.analysis.totals.notFollowingBack.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-slate-400">Na exportação; confira cada perfil antes do unfollow</p></div>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-[2rem] sm:p-6">
@@ -2179,7 +2179,7 @@ export function CleanupManager() {
           </div>
           <div className={`rounded-2xl border p-4 text-sm ${androidReady ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-amber-200 bg-amber-50 text-amber-950"}`}>
             <div className="font-black">{androidReady ? "APK ativo" : "Modo celular no navegador"}</div>
-            <p className="mt-1 leading-6">{androidReady ? "O APK pode visitar perfis para obter a contagem de seguidores. Essa leitura NÃO confirma se a pessoa segue você de volta: a segunda conferência é feita separadamente em Revisar." : "No Chrome Android comum, a automação não pode ler outras páginas. O APK também verifica somente a contagem, não a reciprocidade; confirme-a separadamente em Revisar."}</p>
+            <p className="mt-1 leading-6">{androidReady ? "O APK verifica a contagem de seguidores. A reciprocidade vem da exportação e pode estar desatualizada: confira no Instagram antes do unfollow." : "No Chrome Android comum, a automação não pode ler outras páginas. Use o APK ou a extensão para a contagem; confira no Instagram antes do unfollow."}</p>
             {androidReady && appSnapshotSavedAt ? (
               <p className="mt-2 text-xs font-black text-emerald-800">
                 Salvo no app: {new Date(appSnapshotSavedAt).toLocaleString("pt-BR")}
