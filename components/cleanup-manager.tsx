@@ -264,12 +264,22 @@ export function CleanupManager() {
     });
 
     if (verifiedRecords.length) {
-      await upsertProfileMetadataBatch(verifiedRecords);
+      // Cloud may contain an older result when a forced review has just
+      // completed locally. Never overwrite a newer local count.
+      const storedRecords = await getProfileMetadata();
+      const storedByName = new Map(storedRecords.map((item) => [item.username, item] as const));
+      const newerRecords = verifiedRecords.filter((item) =>
+        !storedByName.has(item.username) ||
+        item.updatedAt > (storedByName.get(item.username)?.updatedAt ?? ""),
+      );
+      if (newerRecords.length) await upsertProfileMetadataBatch(newerRecords);
       setProfileMetadata((current) => {
-        const map = new Map(
-          current.map((item) => [item.username, item] as const),
-        );
-        for (const item of verifiedRecords) map.set(item.username, item);
+        const map = new Map(current.map((item) => [item.username, item] as const));
+        for (const item of newerRecords) {
+          if (!map.has(item.username) || item.updatedAt > (map.get(item.username)?.updatedAt ?? "")) {
+            map.set(item.username, item);
+          }
+        }
         return Array.from(map.values());
       });
     }
@@ -324,7 +334,11 @@ export function CleanupManager() {
     function mergeMetadata(records: ProfileMetadata[]) {
       setProfileMetadata((current) => {
         const map = new Map(current.map((item) => [item.username, item] as const));
-        for (const item of records) map.set(item.username, item);
+        for (const item of records) {
+          if (!map.has(item.username) || item.updatedAt >= (map.get(item.username)?.updatedAt ?? "")) {
+            map.set(item.username, item);
+          }
+        }
         return Array.from(map.values());
       });
     }
