@@ -918,12 +918,24 @@ export function CleanupManager() {
         });
 
         if (!records.length) return;
-        const verifiedUsernames = new Set(records.map((item) => item.username));
+        const activeFailures = new Set(
+          Array.isArray(data.failures)
+            ? data.failures.flatMap((failure) =>
+                typeof failure?.username === "string"
+                  ? [failure.username.trim().toLowerCase().replace(/^@/, "")]
+                  : [],
+              )
+            : [],
+        );
+        const verifiedUsernames = new Set(
+          records.filter((item) => !activeFailures.has(item.username)).map((item) => item.username),
+        );
         setReviewFlags((current) => {
           const next = { ...current };
           for (const username of verifiedUsernames) delete next[username];
           return next;
         });
+        // An older cached count cannot invalidate a newer failed recheck.
         setExtensionFailures((current) => current.filter((item) => !verifiedUsernames.has(item.username)));
         const mostRecent = [...records].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
         if (mostRecent && typeof mostRecent.followersCount === "number") {
