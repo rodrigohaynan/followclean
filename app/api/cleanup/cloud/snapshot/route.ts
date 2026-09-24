@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { mergeReciprocityChecks, type CleanupSettings } from "@/lib/rules/engine";
 import { getCloudIdentity } from "@/lib/cloud/auth";
 import {
   cloudDatabaseConfigured,
@@ -126,6 +127,26 @@ export async function POST(request: NextRequest) {
   await ensureCloudSchema();
   const sql = getCloudSql();
 
+  // Older devices can upload a snapshot without the new confirmations.
+  // Merge by confirmation date instead of allowing a stale upload to erase
+  // a "follows" safety decision stored in the cloud.
+  const previous = await sql.query(
+    "SELECT settings FROM followclean_cleanup_snapshot WHERE owner_id = $1",
+    [identity.ownerId],
+  );
+  const storedSettings = previous[0]?.settings &&
+    typeof previous[0].settings === "object"
+      ? previous[0].settings as Record<string, unknown>
+      : {};
+  const incomingSettings = settings as Record<string, unknown>;
+  const mergedSettings = {
+    ...incomingSettings,
+    reciprocityChecks: mergeReciprocityChecks(
+      storedSettings.reciprocityChecks as CleanupSettings["reciprocityChecks"],
+      incomingSettings.reciprocityChecks as CleanupSettings["reciprocityChecks"],
+    ),
+  };
+
   await sql.query(
     `
       INSERT INTO followclean_cleanup_snapshot (
@@ -156,7 +177,7 @@ export async function POST(request: NextRequest) {
       sourceFile,
       analysisCreatedAt.toISOString(),
       JSON.stringify(protectedProfiles),
-      JSON.stringify(settings),
+      JSON.stringify(mergedSettings),
     ],
   );
 
