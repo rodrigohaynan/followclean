@@ -129,6 +129,7 @@ export function CleanupManager() {
   const [lastRead, setLastRead] = useState<{ username: string; followersCount: number } | null>(null);
   const [bulkReviewArmed, setBulkReviewArmed] = useState(false);
   const [bulkReviewBusy, setBulkReviewBusy] = useState(false);
+  const [bulkRecheckBusy, setBulkRecheckBusy] = useState(false);
   const [networkPauseNote, setNetworkPauseNote] = useState("");
   const [extensionFailures, setExtensionFailures] = useState<UnavailableProfile[]>([]);
   const [cloudConfigured, setCloudConfigured] = useState(false);
@@ -917,6 +918,13 @@ export function CleanupManager() {
         });
 
         if (!records.length) return;
+        const verifiedUsernames = new Set(records.map((item) => item.username));
+        setReviewFlags((current) => {
+          const next = { ...current };
+          for (const username of verifiedUsernames) delete next[username];
+          return next;
+        });
+        setExtensionFailures((current) => current.filter((item) => !verifiedUsernames.has(item.username)));
         const mostRecent = [...records].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
         if (mostRecent && typeof mostRecent.followersCount === "number") {
           setLastRead({ username: mostRecent.username, followersCount: mostRecent.followersCount });
@@ -1734,6 +1742,61 @@ export function CleanupManager() {
     setTab("review");
   }
 
+  // Recheck a whole section without deleting its previous counts or protections.
+  const sectionRecheckUsernames = useMemo(() => {
+    const candidates = tab === "priority" ? priority.map((item) => item.username)
+      : tab === "review" ? review.map((item) => item.username)
+      : tab === "above" ? aboveLimit.map((item) => item.username)
+      : tab === "protected" ? protectedProfiles.map((item) => item.username)
+      : unavailable.map((item) => item.username);
+    return Array.from(new Set(candidates
+      .map((value) => value.trim().toLowerCase().replace(/^@/, ""))
+      .filter((value) => /^[a-z0-9._]{1,30}$/.test(value) && !value.startsWith("__deleted__"))));
+  }, [tab, priority, review, aboveLimit, protectedProfiles, unavailable]);
+
+  function recheckAllInSection() {
+    if (batchRunning || bulkRecheckBusy) return;
+    const usernames = sectionRecheckUsernames;
+    if (!usernames.length) {
+      setExtensionNote("Nenhum perfil verificável nesta seção.");
+      return;
+    }
+    if (!androidReady && !extensionReady) {
+      setExtensionNote("Abra pelo APK atualizado ou conecte a extensão FollowClean para revisar a seção.");
+      return;
+    }
+    const labels: Record<Tab, string> = {
+      priority: "Prioridade", review: "Revisar", above: "Acima do limite",
+      protected: "Protegidos", unavailable: "Indisponíveis",
+    };
+    if (!window.confirm(
+      `Revisar todos os ${usernames.length.toLocaleString("pt-BR")} perfis da seção ${labels[tab]}? As leituras antigas serão preservadas até que novas leituras sejam concluídas. Perfis protegidos continuarão protegidos. A operação pode demorar e respeita as pausas do scanner.`
+    )) return;
+    setBulkRecheckBusy(true);
+    setBatchQueueTotal(usernames.length);
+    setBatchProcessed(0);
+    setBatchCurrent(null);
+    setBatchLastMessage("");
+    setNetworkPauseNote("");
+    setExtensionNote(`Iniciando revisão de ${usernames.length.toLocaleString("pt-BR")} perfis em ${labels[tab]}...`);
+    try {
+      if (androidReady && androidBridge()?.postMessage) {
+        androidBridge()?.postMessage(JSON.stringify({
+          type: "START_BATCH", usernames, forceRecheck: true,
+        }));
+      } else if (extensionReady) {
+        window.postMessage({
+          source: "followclean-web", type: "SET_QUEUE_AND_START",
+          usernames, forceRecheck: true,
+        }, "*");
+      }
+    } catch {
+      setExtensionNote("Não foi possível iniciar a revisão. Os registros anteriores foram preservados.");
+    } finally {
+      setBulkRecheckBusy(false);
+    }
+  }
+
   function sendQueueToExtension() {
     window.postMessage(
       {
@@ -2211,6 +2274,18 @@ export function CleanupManager() {
             </div>
           ) : null}
 
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-black text-blue-950">Nova verificação da seção</p>
+              <p className="text-xs leading-5 text-blue-800">{sectionRecheckUsernames.length.toLocaleString("pt-BR")} perfis · toda a categoria, independentemente do filtro alfabético ou busca. Resultados anteriores preservados até a nova consulta.</p>
+            </div>
+            <button type="button" onClick={recheckAllInSection}
+              disabled={batchRunning || bulkRecheckBusy || (!androidReady && !extensionReady) || sectionRecheckUsernames.length === 0}
+              className="min-h-11 rounded-xl bg-blue-700 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">
+              {bulkRecheckBusy ? "Preparando..." : `Revisar todos (${sectionRecheckUsernames.length.toLocaleString("pt-BR")})`}
+            </button>
+            {!androidReady && !extensionReady ? <p className="w-full text-xs text-blue-800">Conecte o APK atualizado ou a extensão atualizada para iniciar a revisão.</p> : null}
+          </div>
           <div className="mt-4 border-t border-slate-100 pt-4">
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-1">
               <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">Ir para inicial</p>
