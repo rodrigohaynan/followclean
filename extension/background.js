@@ -26,6 +26,7 @@ async function ensureDeviceId() {
 async function getState() {
   const stored = await chrome.storage.local.get([
     "followcleanQueue",
+    "followcleanForcedRechecks",
     "followcleanResults",
     "followcleanBatch",
     "followcleanFailures",
@@ -36,6 +37,9 @@ async function getState() {
   return {
     queue: Array.isArray(stored.followcleanQueue)
       ? stored.followcleanQueue.map(normalizeUsername).filter(Boolean)
+      : [],
+    forcedRechecks: Array.isArray(stored.followcleanForcedRechecks)
+      ? stored.followcleanForcedRechecks.map(normalizeUsername).filter(Boolean)
       : [],
     results: stored.followcleanResults || {},
     failures: stored.followcleanFailures || {},
@@ -83,9 +87,11 @@ async function scheduleTimeout() {
 }
 
 async function nextPendingLocal() {
-  const { queue, results, failures } = await getState();
+  const { queue, results, failures, forcedRechecks } = await getState();
+  const forced = new Set(forcedRechecks);
   return (
     queue.find((username) => {
+      if (forced.has(username)) return true;
       const result = results[username];
       const validResult = result && Number(result.parserVersion || 0) >= 2;
       return !validResult && !failures[username];
@@ -136,6 +142,11 @@ async function reportCloudResult(payload) {
 }
 
 async function resolveNextUsername(state) {
+  // Forced reviews are a local session even when the user's regular cloud
+  // checkpoint is enabled: cloud-verified rows must not suppress the review.
+  if (state.forcedRechecks.length) {
+    return { mode: "local", retry: false, username: await nextPendingLocal() };
+  }
   if (state.cloudAuth?.configured && state.cloudAuth?.token) {
     const claimed = await claimNextCloud(state.deviceId);
 
@@ -226,7 +237,7 @@ async function finishCurrentProfile({
   const state = await getState();
   const processed = (state.batch.processedThisRun || 0) + 1;
 
-  if (state.cloudAuth?.configured && state.cloudAuth?.token) {
+  if (!state.forcedRechecks.includes(username) && state.cloudAuth?.configured && state.cloudAuth?.token) {
     await reportCloudResult({
       deviceId: state.deviceId,
       username,
@@ -237,6 +248,11 @@ async function finishCurrentProfile({
     });
   }
 
+  if (state.forcedRechecks.includes(username)) {
+    await chrome.storage.local.set({
+      followcleanForcedRechecks: state.forcedRechecks.filter((value) => value !== username)
+    });
+  }
   await saveBatch({
     processedThisRun: processed,
     currentUsername: null,
