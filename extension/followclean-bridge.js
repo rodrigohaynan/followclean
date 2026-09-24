@@ -96,6 +96,7 @@
       const queue = normalizeUsernames(message.usernames);
       await chrome.storage.local.set({
         followcleanQueue: queue,
+        followcleanForcedRechecks: message.forceRecheck ? queue : [],
         followcleanQueueUpdatedAt: new Date().toISOString()
       });
       post("QUEUE_SAVED", { total: queue.length });
