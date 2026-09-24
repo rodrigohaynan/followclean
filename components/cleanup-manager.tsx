@@ -2033,17 +2033,48 @@ export function CleanupManager() {
         </div>
         <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-sm leading-6 sm:mt-5 sm:p-4 text-blue-950 sm:flex-row sm:items-center sm:justify-between"><span>A regra já entende a contagem de seguidores. A conexão oficial da Meta valida sua conta; a extensão assistida enriquece os perfis da fila.</span><Link href="/conectar" className="inline-flex shrink-0 items-center gap-2 font-black text-blue-700"><Instagram size={16} /> Instagram conectado</Link></div>
         <div className="mt-3 grid gap-3 lg:grid-cols-3">
-          <div className={`rounded-2xl border p-4 text-sm ${extensionReady || androidReady ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
-            <div className="font-black">{androidReady ? "FollowClean Android · scanner nativo" : "FollowClean Assist · navegador"}</div>
-            <p className="mt-1 leading-6">{extensionNote}</p>
-            {batchRunning ? <p className="mt-1 text-xs font-black text-emerald-800">Execução contínua · {batchProcessed.toLocaleString("pt-BR")} perfis nesta sessão {batchCurrent ? `· @${batchCurrent}` : ""}</p> : null}
-            {networkPauseNote ? <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs font-black text-amber-900">{networkPauseNote}</p> : null}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" disabled={(!extensionReady && !androidReady) || pendingCountChecks.length === 0 || batchRunning} onClick={startAutomaticVerification} className="rounded-lg fc-dark-action bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Iniciar verificação contínua</button>
-              <button type="button" disabled={(!extensionReady && !androidReady) || !batchRunning} onClick={pauseAutomaticVerification} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800 disabled:cursor-not-allowed disabled:opacity-40">Pausar</button>
-              {!androidReady ? <button type="button" disabled={!extensionReady || pendingCountChecks.length === 0} onClick={sendQueueToExtension} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Só enviar fila</button> : null}
-              <button type="button" disabled={syncBusy || (!extensionReady && !androidReady)} onClick={() => void syncExtensionResults()} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">{syncBusy ? "Sincronizando..." : "Sincronizar"}</button>
-              {!androidReady ? <Link href="/extensao" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700">Instalar extensão</Link> : null}
+          <div className="flex min-w-0 min-h-[27.5rem] flex-col rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950 sm:min-h-[26rem]" aria-label="Scanner de seguidores">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <h3 className="min-w-0 truncate font-black" title={androidReady ? "FollowClean Android · Scanner nativo" : "FollowClean Assist · Scanner"}>{androidReady ? "Scanner Android" : "Scanner · navegador"}</h3>
+              <span role="status" aria-live="polite" className={`inline-flex h-8 min-w-[7.25rem] shrink-0 items-center justify-center gap-1 rounded-full px-2 text-[11px] font-bold ${scannerStatusTone}`}>
+                {batchRunning || syncBusy ? <LoaderCircle size={13} className="shrink-0 animate-spin" aria-hidden="true" /> : <CheckCircle2 size={13} className="shrink-0" aria-hidden="true" />}
+                <span className="truncate">{scannerStatus}</span>
+              </span>
+            </div>
+            <p className="mt-2 h-5 truncate text-xs text-emerald-900/80" title="Leitura automática da contagem de seguidores; reciprocidade verificada separadamente.">
+              Leitura da contagem de seguidores · reciprocidade à parte
+            </p>
+            <div className="mt-4 rounded-xl border border-emerald-200 bg-white/85 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-600">Progresso da sessão</span>
+                <span className="shrink-0 font-bold tabular-nums text-slate-900">{scannerProcessed.toLocaleString("pt-BR")} / {scannerTotal.toLocaleString("pt-BR")}</span>
+              </div>
+              <div role="progressbar" aria-label="Progresso da verificação" aria-valuemin={0} aria-valuemax={100} aria-valuenow={scannerPercent} className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
+                <div className="h-full rounded-full bg-emerald-600 transition-[width] duration-300" style={{ width: `${scannerPercent}%` }} />
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold text-slate-500">Perfil atual</p>
+                  <p className="h-5 truncate font-semibold text-slate-900" title={batchRunning && batchCurrent ? `@${batchCurrent}` : "Nenhum perfil em leitura"}>
+                    {batchRunning && batchCurrent ? `@${batchCurrent}` : "—"}
+                  </p>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold text-slate-500">Última leitura</p>
+                  <p className="h-5 truncate font-medium text-slate-800" title={lastRead ? `@${lastRead.username}: ${lastRead.followersCount.toLocaleString("pt-BR")} seguidores` : "Nenhuma leitura registrada"}>
+                    {lastRead ? `@${lastRead.username}: ${lastRead.followersCount.toLocaleString("pt-BR")} seguidores` : "—"}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <p className="mt-3 h-5 min-w-0 truncate text-xs text-emerald-900/80" title={networkPauseNote || extensionNote} aria-label={networkPauseNote ? "Aviso de rede" : "Último evento"}>
+              {networkPauseNote || extensionNote}
+            </p>
+            <div className="mt-auto grid grid-cols-2 gap-2 pt-4 sm:grid-cols-3">
+              <button type="button" disabled={(!extensionReady && !androidReady) || pendingCountChecks.length === 0 || batchRunning} onClick={startAutomaticVerification} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg fc-dark-action bg-slate-950 px-2 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">{batchRunning ? "Verificando..." : "Iniciar verificação"}</button>
+              <button type="button" disabled={(!extensionReady && !androidReady) || !batchRunning} onClick={pauseAutomaticVerification} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-2 py-2 text-xs font-bold text-amber-900 disabled:cursor-not-allowed disabled:opacity-40">Pausar</button>
+              <button type="button" disabled={syncBusy || (!extensionReady && !androidReady)} onClick={() => void syncExtensionResults()} className="col-span-2 inline-flex min-h-11 items-center justify-center rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 sm:col-span-1">{syncBusy ? "Sincronizando..." : "Sincronizar"}</button>
+              {!androidReady ? <button type="button" disabled={!extensionReady || pendingCountChecks.length === 0} onClick={sendQueueToExtension} className="col-span-2 inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 sm:col-span-3">Só enviar fila</button> : null}
             </div>
           </div>
           <div className={`rounded-2xl border p-4 text-sm ${androidReady ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-amber-200 bg-amber-50 text-amber-950"}`}>
