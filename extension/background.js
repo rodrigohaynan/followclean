@@ -144,7 +144,7 @@ async function reportCloudResult(payload) {
 async function resolveNextUsername(state) {
   // Forced reviews are a local session even when the user's regular cloud
   // checkpoint is enabled: cloud-verified rows must not suppress the review.
-  if (state.forcedRechecks.length) {
+  if (state.batch.forceRecheckMode) {
     return { mode: "local", retry: false, username: await nextPendingLocal() };
   }
   if (state.cloudAuth?.configured && state.cloudAuth?.token) {
@@ -331,12 +331,13 @@ async function handleTimeout() {
   });
 }
 
-async function startBatch() {
+async function startBatch(forceRecheckMode = false) {
   await clearAlarms();
 
   const state = await getState();
   await saveBatch({
     running: true,
+    forceRecheckMode,
     currentUsername: null,
     processedThisRun: 0,
     startedAt: new Date().toISOString(),
@@ -354,7 +355,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== "object") return;
 
   if (message.type === "FOLLOWCLEAN_START_BATCH") {
-    void startBatch().then(() => sendResponse({ ok: true }));
+    void startBatch(Boolean(message.forceRecheck)).then(() => sendResponse({ ok: true }));
     return true;
   }
 
