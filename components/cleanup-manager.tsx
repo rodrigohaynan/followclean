@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Camera as Instagram,
   CheckCircle2,
+  LoaderCircle,
   ExternalLink,
   Plus,
   Search,
@@ -123,6 +124,9 @@ export function CleanupManager() {
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchCurrent, setBatchCurrent] = useState<string | null>(null);
   const [batchProcessed, setBatchProcessed] = useState(0);
+  const [batchQueueTotal, setBatchQueueTotal] = useState(0);
+  const [batchLastMessage, setBatchLastMessage] = useState("");
+  const [lastRead, setLastRead] = useState<{ username: string; followersCount: number } | null>(null);
   const [bulkReviewArmed, setBulkReviewArmed] = useState(false);
   const [bulkReviewBusy, setBulkReviewBusy] = useState(false);
   const [networkPauseNote, setNetworkPauseNote] = useState("");
@@ -362,6 +366,7 @@ export function CleanupManager() {
           running?: unknown;
           currentUsername?: unknown;
           processedThisRun?: unknown;
+          queueTotal?: unknown;
           lastMessage?: unknown;
         } | null;
         snapshot?: unknown;
@@ -687,6 +692,7 @@ export function CleanupManager() {
                 : new Date().toISOString(),
           };
 
+          setLastRead({ username: record.username, followersCount: item.followersCount });
           // Atualiza a classificação imediatamente na tela.
           mergeMetadata([record]);
           setReviewFlags((current) => {
@@ -700,6 +706,7 @@ export function CleanupManager() {
           void upsertProfileMetadataBatch([record]);
 
           if (data.batch) {
+            if (typeof data.batch.queueTotal === "number") setBatchQueueTotal(data.batch.queueTotal);
             setBatchRunning(Boolean(data.batch.running));
             setBatchCurrent(
               typeof data.batch.currentUsername === "string"
@@ -806,9 +813,11 @@ export function CleanupManager() {
       }
 
       if (data.type === "BATCH_STATUS" && data.batch) {
+        if (typeof data.batch.queueTotal === "number") setBatchQueueTotal(data.batch.queueTotal);
         setBatchRunning(Boolean(data.batch.running));
         const statusText =
           typeof data.batch.lastMessage === "string" ? data.batch.lastMessage : "";
+        setBatchLastMessage(statusText);
         if (
           statusText.includes("Sem acesso à internet") ||
           statusText.includes("Falha de rede") ||
@@ -863,6 +872,7 @@ export function CleanupManager() {
         }
 
         if (data.batch) {
+          if (typeof data.batch.queueTotal === "number") setBatchQueueTotal(data.batch.queueTotal);
           setBatchRunning(Boolean(data.batch.running));
           setBatchCurrent(
             typeof data.batch.currentUsername === "string"
@@ -907,6 +917,10 @@ export function CleanupManager() {
         });
 
         if (!records.length) return;
+        const mostRecent = [...records].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+        if (mostRecent && typeof mostRecent.followersCount === "number") {
+          setLastRead({ username: mostRecent.username, followersCount: mostRecent.followersCount });
+        }
 
         void upsertProfileMetadataBatch(records).then(() => {
           mergeMetadata(records);
@@ -1777,6 +1791,10 @@ export function CleanupManager() {
       }
     }
 
+    setBatchQueueTotal(usernames.length);
+    setBatchProcessed(0);
+    setBatchCurrent(null);
+    setBatchLastMessage("");
     if (androidReady && androidBridge()?.postMessage) {
       androidBridge()?.postMessage(
         JSON.stringify({ type: "START_BATCH", usernames }),
@@ -1954,6 +1972,35 @@ export function CleanupManager() {
 
   if (loading) return <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">Carregando regras locais...</div>;
   if (!latest) return <><div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2><p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">O botão Restaurar backup abre um campo grande para você colar manualmente o código completo.</p></div>{restoreBackupDialog}</>;
+
+  // Scanner has reserved space for each changing field, so its height is stable.
+  const scannerTotal = batchQueueTotal > 0 ? batchQueueTotal : pendingCountChecks.length;
+  const scannerProcessed = Math.min(Math.max(0, batchProcessed), scannerTotal);
+  const scannerPercent = scannerTotal > 0
+    ? Math.round((scannerProcessed / scannerTotal) * 100)
+    : 0;
+  const scannerPaused = /pausad|sem acesso|falha de rede|respondeu http|login\/verifica|checkpoint/i.test(batchLastMessage);
+  const scannerDone = /fila concluída/i.test(batchLastMessage);
+  const scannerStatus = syncBusy
+    ? "Sincronizando"
+    : batchRunning
+      ? "Verificando agora"
+      : scannerPaused
+        ? "Pausado"
+        : scannerDone
+          ? "Concluído"
+          : androidReady || extensionReady
+            ? "Pronto para iniciar"
+            : "Aguardando conexão";
+  const scannerStatusTone = batchRunning
+    ? "bg-emerald-600 text-white"
+    : scannerPaused
+      ? "bg-amber-100 text-amber-900"
+      : syncBusy
+        ? "bg-blue-600 text-white"
+        : scannerDone
+          ? "bg-blue-100 text-blue-900"
+          : "bg-slate-200 text-slate-800";
 
   const activeList =
     tab === "priority"
