@@ -48,6 +48,8 @@ class MainActivity : Activity() {
     private var running = false
     private var currentIndex = 0
     private var processedThisRun = 0
+    // Keep prior successful readings until each forced recheck succeeds.
+    private val forceRecheckUsernames = mutableSetOf<String>()
     private var currentUsername: String? = null
     private var extractionAttempts = 0
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
@@ -579,7 +581,7 @@ class MainActivity : Activity() {
                 "REVIEW_PROFILE" -> reviewProfile(json.optString("username"))
                 "START_BATCH" -> {
                     val usernames = json.optJSONArray("usernames") ?: JSONArray()
-                    startBatch(jsonArrayToUsernames(usernames))
+                    startBatch(jsonArrayToUsernames(usernames), json.optBoolean("forceRecheck", false))
                 }
             }
         }.onFailure {
@@ -692,13 +694,19 @@ class MainActivity : Activity() {
         mainWebView.loadUrl(connectUrl)
     }
 
-    private fun startBatch(usernames: List<String>) {
+    private fun startBatch(usernames: List<String>, forceRecheck: Boolean = false) {
+        if (running) {
+            sendBatchStatus("Há uma verificação em andamento. Pause antes de iniciar outra fila.")
+            return
+        }
         if (usernames.isEmpty()) {
             sendBatchStatus("Nenhum perfil pendente para verificar.")
             return
         }
 
         queue = usernames.distinct()
+        forceRecheckUsernames.clear()
+        if (forceRecheck) forceRecheckUsernames.addAll(queue)
         currentIndex = 0
         processedThisRun = 0
         running = true
@@ -743,7 +751,9 @@ class MainActivity : Activity() {
         }
 
         val results = readResults()
-        while (currentIndex < queue.size && results.has(queue[currentIndex])) {
+        while (currentIndex < queue.size &&
+            results.has(queue[currentIndex]) &&
+            !forceRecheckUsernames.contains(queue[currentIndex])) {
             currentIndex++
         }
 
@@ -808,6 +818,7 @@ class MainActivity : Activity() {
 
             if (unavailable) {
                 saveFailure(username, "unavailable")
+                forceRecheckUsernames.remove(username)
                 processedThisRun++
                 currentIndex++
                 currentUsername = null
@@ -829,12 +840,13 @@ class MainActivity : Activity() {
 
             saveResult(username, followersCount)
             clearFailure(username)
+            forceRecheckUsernames.remove(username)
             processedThisRun++
             currentIndex++
             currentUsername = null
             persistState()
 
-            val message = "@$username: $followersCount seguidores (somente contagem; reciprocidade pendente)"
+            val message = "@$username: $followersCount seguidores (contagem atualizada)"
             updateStatus(message)
             sendProfileResultToWeb(username, followersCount)
             sendResultsToWeb()
@@ -868,6 +880,7 @@ class MainActivity : Activity() {
             return
         }
         saveFailure(username, "no_response")
+        forceRecheckUsernames.remove(username)
         processedThisRun++
         currentIndex++
         currentUsername = null
@@ -1248,6 +1261,7 @@ class MainActivity : Activity() {
     private fun persistState() {
         prefs.edit()
             .putString("queue", JSONArray(queue).toString())
+            .putString("forceRecheckUsernames", JSONArray(forceRecheckUsernames.toList()).toString())
             .putInt("currentIndex", currentIndex)
             .putInt("processedThisRun", processedThisRun)
             .putBoolean("running", running)
@@ -1263,6 +1277,12 @@ class MainActivity : Activity() {
         }.getOrDefault(emptyList())
 
         currentIndex = prefs.getInt("currentIndex", 0)
+        forceRecheckUsernames.clear()
+        val storedForce = prefs.getString("forceRecheckUsernames", null)
+        if (!storedForce.isNullOrBlank()) {
+            runCatching { jsonArrayToUsernames(JSONArray(storedForce)) }
+                .getOrDefault(emptyList()).forEach { forceRecheckUsernames.add(it) }
+        }
         processedThisRun = prefs.getInt("processedThisRun", 0)
         running = false
         currentUsername = null
