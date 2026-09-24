@@ -41,7 +41,7 @@ import {
   type StoredAnalysis,
 } from "@/lib/storage/indexeddb";
 
-type Tab = "priority" | "review" | "above" | "protected" | "unavailable";
+type Tab = "priority" | "pre_priority" | "review" | "above" | "protected" | "unavailable";
 type InitialFilter = "all" | "special" | "0-9" | (typeof ALPHABET)[number];
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("") as readonly string[];
@@ -116,7 +116,7 @@ export function CleanupManager() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [newProtected, setNewProtected] = useState("");
-  const [tab, setTab] = useState<Tab>("priority");
+  const [tab, setTab] = useState<Tab>("pre_priority");
   const [initialFilter, setInitialFilter] = useState<InitialFilter>("all");
   const [extensionReady, setExtensionReady] = useState(false);
   const [androidReady, setAndroidReady] = useState(false);
@@ -1098,6 +1098,10 @@ export function CleanupManager() {
     () => queue.filter((item) => item.classification === "priority" && !unavailableSet.has(item.username.toLowerCase())),
     [queue, unavailableSet],
   );
+  const prePriority = useMemo(
+    () => queue.filter((item) => item.classification === "pre_priority" && !unavailableSet.has(item.username.toLowerCase())),
+    [queue, unavailableSet],
+  );
   const review = useMemo(
     () => queue.filter((item) => item.classification === "review" && !unavailableSet.has(item.username.toLowerCase())),
     [queue, unavailableSet],
@@ -1130,6 +1134,13 @@ export function CleanupManager() {
       (!normalizedQuery || item.username.includes(normalizedQuery))
     )),
     [priority, normalizedQuery, initialFilter, verificationDates],
+  );
+  const filteredPrePriority = useMemo(
+    () => sortAllByVerification(prePriority.filter((item) =>
+      matchesInitial(item.username, initialFilter) &&
+      (!normalizedQuery || item.username.includes(normalizedQuery))
+    )),
+    [prePriority, normalizedQuery, initialFilter, verificationDates],
   );
   const filteredReview = useMemo(
     () => sortAllByVerification(review.filter((item) =>
@@ -1172,11 +1183,12 @@ export function CleanupManager() {
 
   const initialSource = useMemo(() => {
     if (tab === "priority") return priority.map((item) => item.username);
+    if (tab === "pre_priority") return prePriority.map((item) => item.username);
     if (tab === "review") return review.map((item) => item.username);
     if (tab === "above") return aboveLimit.map((item) => item.username);
     if (tab === "protected") return protectedProfiles.map((item) => item.username);
     return unavailable.map((item) => item.username);
-  }, [tab, priority, review, aboveLimit, protectedProfiles, unavailable]);
+  }, [tab, priority, prePriority, review, aboveLimit, protectedProfiles, unavailable]);
 
   const availableInitials = useMemo(() => {
     const values = new Set<string>();
@@ -2005,7 +2017,9 @@ export function CleanupManager() {
   const activeList =
     tab === "priority"
       ? filteredPriority
-      : tab === "review"
+      : tab === "pre_priority"
+        ? filteredPrePriority
+        : tab === "review"
         ? filteredReview
         : tab === "above"
           ? filteredAboveLimit
@@ -2014,9 +2028,10 @@ export function CleanupManager() {
   return (
     <>
     <div className="space-y-3 sm:space-y-6">
-      <section className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-6">
-        <div className="rounded-2xl border border-red-200 bg-red-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-red-700">Prioridade</p><p className="mt-2 text-3xl font-black text-red-950">{priority.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-red-600/70">Dupla confirmação · até {settings.maxFollowers.toLocaleString("pt-BR")} seguidores</p></div>
-        <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-amber-700">Revisar</p><p className="mt-2 text-3xl font-black text-amber-950">{review.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-amber-700/70">Contagem ou segunda conferência pendente</p></div>
+      <section className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-4">
+        <div className="rounded-2xl border border-red-200 bg-red-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-red-700">Prioridade confirmada</p><p className="mt-2 text-3xl font-black text-red-950">{priority.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-red-600/70">Dupla confirmação · até {settings.maxFollowers.toLocaleString("pt-BR")} seguidores</p></div>
+        <div className="rounded-2xl border border-orange-200 bg-orange-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-orange-800">Pré-prioridade</p><p className="mt-2 text-3xl font-black text-orange-950">{prePriority.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-orange-800/70">Até {settings.maxFollowers.toLocaleString("pt-BR")} seguidores · confirmar reciprocidade</p></div>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-amber-700">Revisar contagem</p><p className="mt-2 text-3xl font-black text-amber-950">{review.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-amber-700/70">Quantidade de seguidores desconhecida</p></div>
         <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-blue-700">Acima do limite</p><p className="mt-2 text-3xl font-black text-blue-950">{aboveLimit.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-blue-700/70">Não segue + mais de {settings.maxFollowers.toLocaleString("pt-BR")}</p></div>
         <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-slate-500">Protegidos</p><p className="mt-2 text-3xl font-black text-slate-950">{protectedProfiles.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-slate-400">Nunca entram na fila</p></div>
         <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-violet-700">Indisponíveis</p><p className="mt-2 text-3xl font-black text-violet-950">{unavailable.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-violet-700/70">Removidos da fila principal</p></div>
@@ -2153,8 +2168,9 @@ export function CleanupManager() {
         <div className="border-b border-slate-200 p-3 sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex w-full flex-nowrap gap-2 overflow-x-auto pb-1 lg:flex-wrap">
-              <button type="button" onClick={() => setTab("priority")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "priority" ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600"}`}>Prioridade ({priority.length.toLocaleString("pt-BR")})</button>
-              <button type="button" onClick={() => setTab("review")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "review" ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>Revisar ({review.length.toLocaleString("pt-BR")})</button>
+              <button type="button" onClick={() => setTab("priority")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "priority" ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600"}`}>Prioridade confirmada ({priority.length.toLocaleString("pt-BR")})</button>
+              <button type="button" onClick={() => setTab("pre_priority")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "pre_priority" ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-600"}`}>Pré-prioridade ({prePriority.length.toLocaleString("pt-BR")})</button>
+              <button type="button" onClick={() => setTab("review")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "review" ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>Revisar contagem ({review.length.toLocaleString("pt-BR")})</button>
               <button type="button" onClick={() => setTab("above")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "above" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>Acima do limite ({aboveLimit.length.toLocaleString("pt-BR")})</button>
               <button type="button" onClick={() => setTab("protected")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "protected" ? "fc-dark-action bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>Protegidos ({protectedProfiles.length.toLocaleString("pt-BR")})</button>
               <button type="button" onClick={() => setTab("unavailable")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "unavailable" ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-600"}`}>Indisponíveis ({unavailable.length.toLocaleString("pt-BR")})</button>
@@ -2246,7 +2262,7 @@ export function CleanupManager() {
             </div>
           </div>
         </div>
-        {tab === "protected" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredProtected.map((item) => <div key={item.username} className="flex items-center justify-between gap-3 px-3 py-3 sm:gap-4 sm:px-6 sm:py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">Protegido neste dispositivo</p></div><button type="button" onClick={() => removeProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"><X size={14} /> Remover proteção</button></div>)}{!filteredProtected.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil protegido.</div> : null}</div> : tab === "unavailable" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredUnavailable.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">{unavailableReasonLabel(item.reason)} · Fonte: {item.source === "import" ? "arquivo do Instagram" : item.source === "android" ? "APK Android" : "verificação automática"}</p></div>{!item.username.startsWith("__deleted__") ? <div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => openProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Testar perfil</button><button type="button" onClick={() => void reviewProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Revisar novamente</button></div> : null}</div>)}{!filteredUnavailable.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil indisponível identificado.</div> : null}</div> : <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{activeList.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-4"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-black text-slate-900">@{item.username}</p>{typeof item.followersCount === "number" ? <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.classification === "above_limit" ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>{item.followersCount.toLocaleString("pt-BR")} seguidores</span> : <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">contagem pendente</span>}</div><p className="mt-1 text-xs text-slate-500">{reviewFlags[item.username] ? "Leitura automática inconclusiva · " : ""}{item.reasons.join(" · ")} · Contagem: {sourceLabel(item.dataSource)} · Reciprocidade: {settings.reciprocityChecks[item.username]?.result === "not_following" && settings.reciprocityChecks[item.username]?.analysisCreatedAt === latest.createdAt ? "exportação + confirmação manual" : "segunda conferência pendente"}</p></div><div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => openProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Abrir perfil</button><button type="button" onClick={() => void reviewProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Revisar contagem</button><button type="button" onClick={() => void confirmReciprocity(item.username, "follows")} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">Confirmei: segue-me</button>{tab === "review" ? <button type="button" onClick={() => void confirmReciprocity(item.username, "not_following")} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">Conferi: não me segue</button> : null}{typeof item.followersCount !== "number" ? <button type="button" onClick={() => saveManualFollowers(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Informar seguidores</button> : null}<button type="button" onClick={() => addProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700"><ShieldCheck size={14} /> Proteger</button></div></div>)}{!activeList.length ? <div className="p-8 text-center text-sm text-slate-500">{tab === "priority" ? "Nenhum perfil com as duas verificações confirmadas está dentro do limite atual." : tab === "above" ? "Nenhum perfil conhecido está acima do limite atual." : "Nenhum perfil aguardando segunda conferência."}</div> : null}</div>}
+        {tab === "protected" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredProtected.map((item) => <div key={item.username} className="flex items-center justify-between gap-3 px-3 py-3 sm:gap-4 sm:px-6 sm:py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">Protegido neste dispositivo</p></div><button type="button" onClick={() => removeProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"><X size={14} /> Remover proteção</button></div>)}{!filteredProtected.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil protegido.</div> : null}</div> : tab === "unavailable" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredUnavailable.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">{unavailableReasonLabel(item.reason)} · Fonte: {item.source === "import" ? "arquivo do Instagram" : item.source === "android" ? "APK Android" : "verificação automática"}</p></div>{!item.username.startsWith("__deleted__") ? <div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => openProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Testar perfil</button><button type="button" onClick={() => void reviewProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Revisar novamente</button></div> : null}</div>)}{!filteredUnavailable.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil indisponível identificado.</div> : null}</div> : <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{activeList.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-4"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-black text-slate-900">@{item.username}</p>{typeof item.followersCount === "number" ? <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.classification === "above_limit" ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>{item.followersCount.toLocaleString("pt-BR")} seguidores</span> : <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">contagem pendente</span>}</div><p className="mt-1 text-xs text-slate-500">{reviewFlags[item.username] ? "Leitura automática inconclusiva · " : ""}{item.reasons.join(" · ")} · Contagem: {sourceLabel(item.dataSource)} · Reciprocidade: {settings.reciprocityChecks[item.username]?.result === "not_following" && settings.reciprocityChecks[item.username]?.analysisCreatedAt === latest.createdAt ? "exportação + confirmação manual" : "segunda conferência pendente"}</p></div><div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => openProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Abrir perfil</button><button type="button" onClick={() => void reviewProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Revisar contagem</button><button type="button" onClick={() => void confirmReciprocity(item.username, "follows")} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">Confirmei: segue-me</button>{(tab === "review" || tab === "pre_priority") ? <button type="button" onClick={() => void confirmReciprocity(item.username, "not_following")} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">Conferi: não me segue</button> : null}{typeof item.followersCount !== "number" ? <button type="button" onClick={() => saveManualFollowers(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Informar seguidores</button> : null}<button type="button" onClick={() => addProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700"><ShieldCheck size={14} /> Proteger</button></div></div>)}{!activeList.length ? <div className="p-8 text-center text-sm text-slate-500">{tab === "priority" ? "Nenhum perfil com as duas verificações confirmadas está dentro do limite atual." : tab === "pre_priority" ? "Nenhum perfil com contagem conhecida aguarda segunda confirmação de reciprocidade." : tab === "above" ? "Nenhum perfil conhecido está acima do limite atual." : "Nenhum perfil aguardando verificação da contagem."}</div> : null}</div>}
       </section>
     </div>
     {restoreBackupDialog}
