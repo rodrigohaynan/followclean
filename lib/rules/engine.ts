@@ -55,7 +55,7 @@ export type CleanupCandidate = {
   followersCount?: number;
   accountType?: string;
   dataSource: ProfileDataSource;
-  classification: "priority" | "review" | "above_limit";
+  classification: "priority" | "pre_priority" | "review" | "above_limit";
 };
 
 export const DEFAULT_CLEANUP_SETTINGS: CleanupSettings = {
@@ -114,7 +114,7 @@ export function buildCleanupQueue(
               ? "above_limit"
               : secondCheckConfirmed
                 ? "priority"
-                : "review",
+                : "pre_priority",
           reasons: [
             secondCheckConfirmed
               ? "Ausência de reciprocidade confirmada por importação + conferência manual"
@@ -128,7 +128,7 @@ export function buildCleanupQueue(
     })
     .sort((a, b) => {
       if (a.classification !== b.classification) {
-        const order = { priority: 0, review: 1, above_limit: 2 } as const;
+        const order = { priority: 0, pre_priority: 1, review: 2, above_limit: 3 } as const;
         return order[a.classification] - order[b.classification];
       }
       if (typeof a.followersCount === "number" && typeof b.followersCount === "number") {
