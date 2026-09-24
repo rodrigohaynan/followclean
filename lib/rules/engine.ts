@@ -16,10 +16,37 @@ export type ProfileMetadata = {
   parserVersion?: number;
 };
 
+export type ReciprocityCheck = {
+  result: "follows" | "not_following";
+  checkedAt: string;
+  analysisCreatedAt: string;
+  method: "manual";
+};
+
 export type CleanupSettings = {
   notFollowingBack: boolean;
   maxFollowers: number;
+  reciprocityChecks: Record<string, ReciprocityCheck>;
 };
+
+/** A newer confirmation from either device wins during cloud/app restores. */
+export function mergeReciprocityChecks(
+  local: CleanupSettings["reciprocityChecks"] = {},
+  remote: CleanupSettings["reciprocityChecks"] = {},
+): CleanupSettings["reciprocityChecks"] {
+  const result = { ...local };
+  for (const [username, check] of Object.entries(remote)) {
+    if (!check || (check.result !== "follows" && check.result !== "not_following") ||
+        typeof check.checkedAt !== "string" || typeof check.analysisCreatedAt !== "string" ||
+        check.method !== "manual") continue;
+    const normalized = username.trim().toLowerCase().replace(/^@/, "");
+    if (!normalized) continue;
+    if (!result[normalized] || check.checkedAt > result[normalized].checkedAt) {
+      result[normalized] = check;
+    }
+  }
+  return result;
+}
 
 export type CleanupCandidate = {
   username: string;
@@ -33,6 +60,7 @@ export type CleanupCandidate = {
 export const DEFAULT_CLEANUP_SETTINGS: CleanupSettings = {
   notFollowingBack: true,
   maxFollowers: 2000,
+  reciprocityChecks: {},
 };
 
 export function buildCleanupQueue(
@@ -40,6 +68,7 @@ export function buildCleanupQueue(
   protectedUsernames: Iterable<string>,
   settings: CleanupSettings,
   metadata: Iterable<ProfileMetadata> = [],
+  analysisCreatedAt = "",
 ): CleanupCandidate[] {
   const protectedSet = new Set(
     Array.from(protectedUsernames, (username) => username.toLowerCase()),
@@ -54,6 +83,14 @@ export function buildCleanupQueue(
     .filter((username) => !protectedSet.has(username.toLowerCase()))
     .filter((username) => !username.toLowerCase().startsWith("__deleted__"))
     .flatMap((username): CleanupCandidate[] => {
+      const check = settings.reciprocityChecks?.[username.toLowerCase()];
+      // Import and individual confirmation are independent methods. The
+      // follower count obtained by the scanner does NOT confirm reciprocity.
+      if (check?.result === "follows") return [];
+      const secondCheckConfirmed =
+        check?.result === "not_following" &&
+        check.analysisCreatedAt === analysisCreatedAt &&
+        check.method === "manual";
       const profile = metadataMap.get(username.toLowerCase());
       const profileIsUsable =
         profile?.dataSource !== "extension" ||
@@ -70,22 +107,19 @@ export function buildCleanupQueue(
           followersCount,
           accountType: profileIsUsable ? profile?.accountType : undefined,
           dataSource: profileIsUsable ? (profile?.dataSource ?? "unknown") : "unknown",
-          classification: !knownCount
+          classification: !knownCount || !secondCheckConfirmed
             ? "review"
             : aboveLimit
               ? "above_limit"
               : "priority",
-          reasons: !knownCount
-            ? ["Não segue você de volta", "Quantidade de seguidores ainda desconhecida"]
-            : aboveLimit
-              ? [
-                  "Não segue você de volta",
-                  `${followersCount.toLocaleString("pt-BR")} seguidores (acima de ${settings.maxFollowers.toLocaleString("pt-BR")})`,
-                ]
-              : [
-                  "Não segue você de volta",
-                  `${followersCount.toLocaleString("pt-BR")} seguidores (até ${settings.maxFollowers.toLocaleString("pt-BR")})`,
-                ],
+          reasons: [
+            secondCheckConfirmed
+              ? "Ausência de reciprocidade confirmada por importação + conferência manual"
+              : "Não encontrado nos seguidores da exportação · segunda conferência pendente",
+            knownCount
+              ? `${followersCount.toLocaleString("pt-BR")} seguidores (${aboveLimit ? "acima" : "até"} ${settings.maxFollowers.toLocaleString("pt-BR")})`
+              : "Quantidade de seguidores ainda desconhecida",
+          ],
         },
       ];
     })
