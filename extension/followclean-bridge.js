@@ -102,7 +102,8 @@
       post("QUEUE_SAVED", { total: queue.length });
 
       const response = await chrome.runtime.sendMessage({
-        type: "FOLLOWCLEAN_START_BATCH"
+        type: "FOLLOWCLEAN_START_BATCH",
+        forceRecheck: Boolean(message.forceRecheck)
       });
       post("BATCH_ACTION", {
         action: "start",
