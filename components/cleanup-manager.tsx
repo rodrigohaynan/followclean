@@ -1986,8 +1986,13 @@ export function CleanupManager() {
   if (!latest) return <><div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2><p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">O botão Restaurar backup abre um campo grande para você colar manualmente o código completo.</p></div>{restoreBackupDialog}</>;
 
   // Scanner has reserved space for each changing field, so its height is stable.
-  const scannerTotal = batchQueueTotal > 0 ? batchQueueTotal : pendingCountChecks.length;
-  const scannerProcessed = Math.min(Math.max(0, batchProcessed), scannerTotal);
+  // A previously finished scanner session is NOT the remaining work queue.
+  // A stale native queueTotal must never suggest that a disabled button can restart it.
+  const hasPendingCountChecks = pendingCountChecks.length > 0;
+  const scannerTotal = hasPendingCountChecks
+    ? (batchRunning && batchQueueTotal > 0 ? batchQueueTotal : pendingCountChecks.length)
+    : 0;
+  const scannerProcessed = batchRunning ? Math.min(Math.max(0, batchProcessed), scannerTotal) : 0;
   const scannerPercent = scannerTotal > 0
     ? Math.round((scannerProcessed / scannerTotal) * 100)
     : 0;
@@ -1995,7 +2000,9 @@ export function CleanupManager() {
   const scannerDone = /fila concluída/i.test(batchLastMessage);
   const scannerStatus = syncBusy
     ? "Sincronizando"
-    : batchRunning
+    : !hasPendingCountChecks && !batchRunning
+      ? "Contagens concluídas"
+      : batchRunning
       ? "Verificando agora"
       : scannerPaused
         ? "Pausado"
@@ -2057,12 +2064,12 @@ export function CleanupManager() {
               </span>
             </div>
             <p className="mt-2 h-5 truncate text-xs text-emerald-900/80" title="Leitura automática da contagem de seguidores; reciprocidade verificada separadamente.">
-              Leitura da contagem de seguidores · reciprocidade à parte
+              Leitura automática: somente contagem de seguidores
             </p>
             <div className="mt-4 rounded-xl border border-emerald-200 bg-white/85 p-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-600">Progresso da sessão</span>
-                <span className="shrink-0 font-bold tabular-nums text-slate-900">{scannerProcessed.toLocaleString("pt-BR")} / {scannerTotal.toLocaleString("pt-BR")}</span>
+                <span className="text-xs font-semibold text-slate-600">{batchRunning ? "Progresso desta sessão" : "Contagens aguardando leitura"}</span>
+                <span className="shrink-0 font-bold tabular-nums text-slate-900">{batchRunning ? scannerProcessed.toLocaleString("pt-BR") + " / " + scannerTotal.toLocaleString("pt-BR") : pendingCountChecks.length.toLocaleString("pt-BR") + " pendentes"}</span>
               </div>
               <div role="progressbar" aria-label="Progresso da verificação" aria-valuemin={0} aria-valuemax={100} aria-valuenow={scannerPercent} className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
                 <div className="h-full rounded-full bg-emerald-600 transition-[width] duration-300" style={{ width: `${scannerPercent}%` }} />
@@ -2082,11 +2089,15 @@ export function CleanupManager() {
                 </div>
               </div>
             </div>
-            <p className="mt-3 h-5 min-w-0 truncate text-xs text-emerald-900/80" title={networkPauseNote || extensionNote} aria-label={networkPauseNote ? "Aviso de rede" : "Último evento"}>
-              {networkPauseNote || extensionNote}
+            <p className="mt-3 h-5 min-w-0 truncate text-xs text-emerald-900/80" title={networkPauseNote || (hasPendingCountChecks ? extensionNote : `${prePriority.length} perfis aguardam segunda conferência em Pré-prioridade.`)} aria-label={networkPauseNote ? "Aviso de rede" : "Próxima ação"}>
+              {networkPauseNote || (!hasPendingCountChecks ? `${prePriority.length.toLocaleString("pt-BR")} perfis aguardam reciprocidade em Pré-prioridade.` : extensionNote)}
             </p>
             <div className="mt-auto grid grid-cols-2 gap-2 pt-4 sm:grid-cols-3">
-              <button type="button" disabled={(!extensionReady && !androidReady) || pendingCountChecks.length === 0 || batchRunning} onClick={startAutomaticVerification} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg fc-dark-action bg-slate-950 px-2 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">{batchRunning ? "Verificando..." : "Iniciar verificação"}</button>
+              {hasPendingCountChecks ? (
+                <button type="button" disabled={(!extensionReady && !androidReady) || batchRunning} onClick={startAutomaticVerification} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg fc-dark-action bg-slate-950 px-2 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40" title="Verificar apenas os perfis cuja quantidade de seguidores ainda é desconhecida">{batchRunning ? "Verificando..." : `Verificar contagens (${pendingCountChecks.length})`}</button>
+              ) : (
+                <button type="button" onClick={() => { setTab("pre_priority"); setInitialFilter("all"); setQuery(""); document.getElementById("followclean-profile-lists")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg bg-orange-600 px-2 py-2 text-xs font-black text-white" title="As contagens já foram lidas. Agora confira manualmente a reciprocidade.">Conferir reciprocidade</button>
+              )}
               <button type="button" disabled={(!extensionReady && !androidReady) || !batchRunning} onClick={pauseAutomaticVerification} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-2 py-2 text-xs font-bold text-amber-900 disabled:cursor-not-allowed disabled:opacity-40">Pausar</button>
               <button type="button" disabled={syncBusy || (!extensionReady && !androidReady)} onClick={() => void syncExtensionResults()} className="col-span-2 inline-flex min-h-11 items-center justify-center rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 sm:col-span-1">{syncBusy ? "Sincronizando..." : "Sincronizar"}</button>
               {!androidReady ? <button type="button" disabled={!extensionReady || pendingCountChecks.length === 0} onClick={sendQueueToExtension} className="col-span-2 inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 sm:col-span-3">Só enviar fila</button> : null}
@@ -2164,7 +2175,7 @@ export function CleanupManager() {
 
       <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-[2rem] sm:p-6"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2 font-black text-slate-950"><ShieldCheck size={19} className="text-emerald-600" /> Lista protegida</div><p className="mt-1 text-sm text-slate-500">Adicione família, amigos, clientes, parceiros ou qualquer conta estratégica.</p></div><form className="flex w-full gap-2 lg:max-w-md" onSubmit={(event) => { event.preventDefault(); if (newProtected.trim()) addProtected(newProtected); }}><input value={newProtected} onChange={(event) => setNewProtected(event.target.value)} placeholder="@usuario" className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-blue-400 focus:bg-white" /><button type="submit" className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white"><Plus size={16} /> Proteger</button></form></div></section>
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:rounded-[2rem]">
+      <section id="followclean-profile-lists" className="scroll-mt-20 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:rounded-[2rem]">
         <div className="border-b border-slate-200 p-3 sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex w-full flex-nowrap gap-2 overflow-x-auto pb-1 lg:flex-wrap">
