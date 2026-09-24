@@ -34,7 +34,8 @@ export function mergeReciprocityChecks(
   local: CleanupSettings["reciprocityChecks"] = {},
   remote: CleanupSettings["reciprocityChecks"] = {},
 ): CleanupSettings["reciprocityChecks"] {
-  const result = { ...local };
+  const result = { ...(local && typeof local === "object" ? local : {}) };
+  if (!remote || typeof remote !== "object") return result;
   for (const [username, check] of Object.entries(remote)) {
     if (!check || (check.result !== "follows" && check.result !== "not_following") ||
         typeof check.checkedAt !== "string" || typeof check.analysisCreatedAt !== "string" ||
@@ -107,11 +108,13 @@ export function buildCleanupQueue(
           followersCount,
           accountType: profileIsUsable ? profile?.accountType : undefined,
           dataSource: profileIsUsable ? (profile?.dataSource ?? "unknown") : "unknown",
-          classification: !knownCount || !secondCheckConfirmed
+          classification: !knownCount
             ? "review"
             : aboveLimit
               ? "above_limit"
-              : "priority",
+              : secondCheckConfirmed
+                ? "priority"
+                : "review",
           reasons: [
             secondCheckConfirmed
               ? "Ausência de reciprocidade confirmada por importação + conferência manual"
