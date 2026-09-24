@@ -834,7 +834,7 @@ class MainActivity : Activity() {
             currentUsername = null
             persistState()
 
-            val message = "@$username: $followersCount seguidores"
+            val message = "@$username: $followersCount seguidores (somente contagem; reciprocidade pendente)"
             updateStatus(message)
             sendProfileResultToWeb(username, followersCount)
             sendResultsToWeb()
