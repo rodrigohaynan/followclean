@@ -88,10 +88,9 @@ export function buildCleanupQueue(
       // Import and individual confirmation are independent methods. The
       // follower count obtained by the scanner does NOT confirm reciprocity.
       if (check?.result === "follows") return [];
-      const secondCheckConfirmed =
-        check?.result === "not_following" &&
-        check.analysisCreatedAt === analysisCreatedAt &&
-        check.method === "manual";
+      // A exportação determina a ausência de reciprocidade; a contagem
+      // automática define a prioridade. Confirmações manuais de "segue"
+      // permanecem como proteção contra falsos negativos.
       const profile = metadataMap.get(username.toLowerCase());
       const profileIsUsable =
         profile?.dataSource !== "extension" ||
@@ -112,13 +111,9 @@ export function buildCleanupQueue(
             ? "review"
             : aboveLimit
               ? "above_limit"
-              : secondCheckConfirmed
-                ? "priority"
-                : "pre_priority",
+              : "priority",
           reasons: [
-            secondCheckConfirmed
-              ? "Ausência de reciprocidade confirmada por importação + conferência manual"
-              : "Não encontrado nos seguidores da exportação · segunda conferência pendente",
+            "Não identificado entre seus seguidores na exportação (confira antes de deixar de seguir)",
             knownCount
               ? `${followersCount.toLocaleString("pt-BR")} seguidores (${aboveLimit ? "acima" : "até"} ${settings.maxFollowers.toLocaleString("pt-BR")})`
               : "Quantidade de seguidores ainda desconhecida",

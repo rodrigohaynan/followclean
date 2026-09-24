@@ -96,12 +96,14 @@
       const queue = normalizeUsernames(message.usernames);
       await chrome.storage.local.set({
         followcleanQueue: queue,
+        followcleanForcedRechecks: message.forceRecheck ? queue : [],
         followcleanQueueUpdatedAt: new Date().toISOString()
       });
       post("QUEUE_SAVED", { total: queue.length });
 
       const response = await chrome.runtime.sendMessage({
-        type: "FOLLOWCLEAN_START_BATCH"
+        type: "FOLLOWCLEAN_START_BATCH",
+        forceRecheck: Boolean(message.forceRecheck)
       });
       post("BATCH_ACTION", {
         action: "start",
