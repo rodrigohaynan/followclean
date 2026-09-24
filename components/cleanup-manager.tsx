@@ -16,6 +16,7 @@ import {
 import {
   buildCleanupQueue,
   DEFAULT_CLEANUP_SETTINGS,
+  mergeReciprocityChecks,
   type CleanupSettings,
   type ProfileMetadata,
 } from "@/lib/rules/engine";
@@ -207,6 +208,11 @@ export function CleanupManager() {
       if (snapshot.settings && typeof snapshot.settings === "object") {
         const rawSettings = snapshot.settings as Record<string, unknown>;
         setSettings((current) => ({
+          ...current,
+          reciprocityChecks: mergeReciprocityChecks(
+            current.reciprocityChecks,
+            rawSettings.reciprocityChecks as CleanupSettings["reciprocityChecks"],
+          ),
           notFollowingBack:
             typeof rawSettings.notFollowingBack === "boolean"
               ? rawSettings.notFollowingBack
@@ -303,6 +309,11 @@ export function CleanupManager() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  // Persist cloud/native merged confirmations without requiring a new import.
+  useEffect(() => {
+    if (!loading) void saveCleanupSettings(settings);
+  }, [settings, loading]);
 
   useEffect(() => {
     function mergeMetadata(records: ProfileMetadata[]) {
@@ -519,7 +530,12 @@ export function CleanupManager() {
 
           if (snapshot.settings && typeof snapshot.settings === "object") {
             const raw = snapshot.settings as Partial<CleanupSettings>;
-            const restored: CleanupSettings = {
+            setSettings((current) => ({
+              ...current,
+              reciprocityChecks: mergeReciprocityChecks(
+                current.reciprocityChecks,
+                raw.reciprocityChecks,
+              ),
               notFollowingBack:
                 typeof raw.notFollowingBack === "boolean"
                   ? raw.notFollowingBack
@@ -527,10 +543,8 @@ export function CleanupManager() {
               maxFollowers:
                 typeof raw.maxFollowers === "number"
                   ? raw.maxFollowers
-                  : DEFAULT_CLEANUP_SETTINGS.maxFollowers,
-            };
-            setSettings(restored);
-            void saveCleanupSettings(restored);
+                  : current.maxFollowers,
+            }));
           }
 
           const metadataRows: ProfileMetadata[] = [];
@@ -700,7 +714,7 @@ export function CleanupManager() {
           }
 
           setExtensionNote(
-            `@${record.username}: ${record.followersCount?.toLocaleString("pt-BR")} seguidores · classificação atualizada.`,
+            `@${record.username}: ${record.followersCount?.toLocaleString("pt-BR")} seguidores · contagem atualizada; reciprocidade requer segunda conferência.`,
           );
         }
         return;
@@ -1041,7 +1055,7 @@ export function CleanupManager() {
   ]);
 
   const protectedSet = useMemo(() => new Set(protectedProfiles.map((item) => item.username)), [protectedProfiles]);
-  const queue = useMemo(() => latest ? buildCleanupQueue(latest.analysis, protectedSet, settings, profileMetadata) : [], [latest, protectedSet, settings, profileMetadata]);
+  const queue = useMemo(() => latest ? buildCleanupQueue(latest.analysis, protectedSet, settings, profileMetadata, latest.createdAt) : [], [latest, protectedSet, settings, profileMetadata]);
   const deletedProfiles = useMemo<UnavailableProfile[]>(
     () =>
       latest
@@ -1073,6 +1087,10 @@ export function CleanupManager() {
   const review = useMemo(
     () => queue.filter((item) => item.classification === "review" && !unavailableSet.has(item.username.toLowerCase())),
     [queue, unavailableSet],
+  );
+  const pendingCountChecks = useMemo(
+    () => review.filter((item) => typeof item.followersCount !== "number"),
+    [review],
   );
   const aboveLimit = useMemo(
     () => queue.filter((item) => item.classification === "above_limit" && !unavailableSet.has(item.username.toLowerCase())),
@@ -1163,6 +1181,38 @@ export function CleanupManager() {
     setNewProtected("");
   }
   async function removeProtected(username: string) { await unprotectProfile(username); setProtectedProfiles((current) => current.filter((item) => item.username !== username)); }
+
+  async function confirmReciprocity(username: string, result: "follows" | "not_following") {
+    const normalized = username.trim().toLowerCase().replace(/^@/, "");
+    if (!normalized || !latest) return;
+    if (result === "not_following" && !window.confirm(
+      `Você conferiu a lista COMPLETA de contas seguidas por @${normalized} e confirmou que seu perfil não está nela? Uma busca parcial não comprova ausência. Se houver dúvida, cancele e mantenha em Revisar.`
+    )) return;
+    if (result === "follows") {
+      const protectedRecord = await protectProfile(normalized, "reciprocidade_confirmada");
+      setProtectedProfiles((current) => [
+        ...current.filter((item) => item.username !== normalized),
+        protectedRecord,
+      ].sort((a, b) => a.username.localeCompare(b.username)));
+    }
+    const next: CleanupSettings = {
+      ...settings,
+      reciprocityChecks: {
+        ...settings.reciprocityChecks,
+        [normalized]: {
+          result,
+          checkedAt: new Date().toISOString(),
+          analysisCreatedAt: latest.createdAt,
+          method: "manual",
+        },
+      },
+    };
+    setSettings(next);
+    await saveCleanupSettings(next);
+    setExtensionNote(result === "follows"
+      ? `@${normalized} confirmado como seguidor recíproco e protegido.`
+      : `@${normalized}: segunda conferência registrada; só entra em Prioridade com contagem válida.`);
+  }
   async function toggleRule() { const next = { ...settings, notFollowingBack: !settings.notFollowingBack }; setSettings(next); await saveCleanupSettings(next); }
   async function updateMaxFollowers(value: number) { const safeValue = Number.isFinite(value) ? Math.max(0, Math.round(value)) : 2000; const next = { ...settings, maxFollowers: safeValue }; setSettings(next); await saveCleanupSettings(next); }
 
@@ -1364,6 +1414,10 @@ export function CleanupManager() {
             typeof rawSettings.maxFollowers === "number"
               ? Math.max(0, Math.round(rawSettings.maxFollowers))
               : DEFAULT_CLEANUP_SETTINGS.maxFollowers,
+          reciprocityChecks: mergeReciprocityChecks(
+            settings.reciprocityChecks,
+            rawSettings.reciprocityChecks as CleanupSettings["reciprocityChecks"],
+          ),
         };
         await saveCleanupSettings(restoredSettings);
         setSettings(restoredSettings);
@@ -1671,14 +1725,18 @@ export function CleanupManager() {
       {
         source: "followclean-web",
         type: "SET_QUEUE",
-        usernames: review.map((item) => item.username),
+        usernames: pendingCountChecks.map((item) => item.username),
       },
       "*",
     );
   }
 
   async function startAutomaticVerification() {
-    const usernames = review.map((item) => item.username);
+    const usernames = pendingCountChecks.map((item) => item.username);
+    if (!usernames.length) {
+      setExtensionNote("As contagens já foram verificadas. Confira a reciprocidade manualmente nos perfis pendentes.");
+      return;
+    }
 
     if (!androidReady && cloudConfigured) {
       try {
@@ -1910,17 +1968,17 @@ export function CleanupManager() {
     <>
     <div className="space-y-3 sm:space-y-6">
       <section className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-6">
-        <div className="rounded-2xl border border-red-200 bg-red-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-red-700">Prioridade</p><p className="mt-2 text-3xl font-black text-red-950">{priority.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-red-600/70">Não segue + até {settings.maxFollowers.toLocaleString("pt-BR")} seguidores</p></div>
-        <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-amber-700">Revisar</p><p className="mt-2 text-3xl font-black text-amber-950">{review.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-amber-700/70">Contagem ainda desconhecida</p></div>
+        <div className="rounded-2xl border border-red-200 bg-red-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-red-700">Prioridade</p><p className="mt-2 text-3xl font-black text-red-950">{priority.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-red-600/70">Dupla confirmação · até {settings.maxFollowers.toLocaleString("pt-BR")} seguidores</p></div>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-amber-700">Revisar</p><p className="mt-2 text-3xl font-black text-amber-950">{review.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-amber-700/70">Contagem ou segunda conferência pendente</p></div>
         <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-blue-700">Acima do limite</p><p className="mt-2 text-3xl font-black text-blue-950">{aboveLimit.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-blue-700/70">Não segue + mais de {settings.maxFollowers.toLocaleString("pt-BR")}</p></div>
         <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-slate-500">Protegidos</p><p className="mt-2 text-3xl font-black text-slate-950">{protectedProfiles.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-slate-400">Nunca entram na fila</p></div>
         <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-violet-700">Indisponíveis</p><p className="mt-2 text-3xl font-black text-violet-950">{unavailable.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-violet-700/70">Removidos da fila principal</p></div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-slate-500">Não seguem você</p><p className="mt-2 text-3xl font-black text-slate-950">{latest.analysis.totals.notFollowingBack.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-slate-400">No snapshot mais recente</p></div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-slate-500">Possíveis não seguidores</p><p className="mt-2 text-3xl font-black text-slate-950">{latest.analysis.totals.notFollowingBack.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-slate-400">Na exportação; segunda conferência necessária</p></div>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-[2rem] sm:p-6">
         <div className="flex flex-col gap-4 sm:gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-2xl"><div className="flex items-center gap-2 text-sm font-black text-slate-950"><SlidersHorizontal size={18} className="text-blue-600" /> Regra principal</div><h2 className="mt-2 text-xl font-black text-slate-950">Não segue de volta + poucos seguidores → prioridade</h2><p className="mt-2 text-sm leading-6 text-slate-500">Perfis protegidos são excluídos. Perfis acima do limite também ficam fora da fila prioritária.</p></div>
+          <div className="max-w-2xl"><div className="flex items-center gap-2 text-sm font-black text-slate-950"><SlidersHorizontal size={18} className="text-blue-600" /> Regra principal</div><h2 className="mt-2 text-xl font-black text-slate-950">Dupla verificação de reciprocidade + poucos seguidores → prioridade</h2><p className="mt-2 text-sm leading-6 text-slate-500">A exportação gera candidatos; a contagem automática não comprova reciprocidade. Para entrar em Prioridade, confira a lista completa de quem o perfil segue e confirme manualmente a ausência do seu usuário. Se não puder concluir, mantenha em Revisar.</p></div>
           <div className="flex flex-wrap items-end gap-3">
             <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-500">Máximo de seguidores</span><input type="number" min={0} step={100} value={settings.maxFollowers} onChange={(event) => setSettings((current) => ({ ...current, maxFollowers: Number(event.target.value) }))} onBlur={(event) => updateMaxFollowers(Number(event.target.value))} className="w-40 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black outline-none focus:border-blue-400 focus:bg-white" /></label>
             <button type="button" onClick={toggleRule} className={`inline-flex min-w-36 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition ${settings.notFollowingBack ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"}`}><CheckCircle2 size={17} /> {settings.notFollowingBack ? "Ativada" : "Desativada"}</button>
@@ -1934,16 +1992,16 @@ export function CleanupManager() {
             {batchRunning ? <p className="mt-1 text-xs font-black text-emerald-800">Execução contínua · {batchProcessed.toLocaleString("pt-BR")} perfis nesta sessão {batchCurrent ? `· @${batchCurrent}` : ""}</p> : null}
             {networkPauseNote ? <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs font-black text-amber-900">{networkPauseNote}</p> : null}
             <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" disabled={(!extensionReady && !androidReady) || review.length === 0 || batchRunning} onClick={startAutomaticVerification} className="rounded-lg fc-dark-action bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Iniciar verificação contínua</button>
+              <button type="button" disabled={(!extensionReady && !androidReady) || pendingCountChecks.length === 0 || batchRunning} onClick={startAutomaticVerification} className="rounded-lg fc-dark-action bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Iniciar verificação contínua</button>
               <button type="button" disabled={(!extensionReady && !androidReady) || !batchRunning} onClick={pauseAutomaticVerification} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800 disabled:cursor-not-allowed disabled:opacity-40">Pausar</button>
-              {!androidReady ? <button type="button" disabled={!extensionReady || review.length === 0} onClick={sendQueueToExtension} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Só enviar fila</button> : null}
+              {!androidReady ? <button type="button" disabled={!extensionReady || pendingCountChecks.length === 0} onClick={sendQueueToExtension} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Só enviar fila</button> : null}
               <button type="button" disabled={syncBusy || (!extensionReady && !androidReady)} onClick={() => void syncExtensionResults()} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">{syncBusy ? "Sincronizando..." : "Sincronizar"}</button>
               {!androidReady ? <Link href="/extensao" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700">Instalar extensão</Link> : null}
             </div>
           </div>
           <div className={`rounded-2xl border p-4 text-sm ${androidReady ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-amber-200 bg-amber-50 text-amber-950"}`}>
             <div className="font-black">{androidReady ? "APK ativo" : "Modo celular no navegador"}</div>
-            <p className="mt-1 leading-6">{androidReady ? "O APK pode visitar os perfis da fila em uma WebView isolada, ler a contagem pública e devolver os resultados automaticamente ao FollowClean." : "No Chrome Android comum, a automação não pode ler outras páginas. Use o APK do FollowClean ou informe a contagem manualmente."}</p>
+            <p className="mt-1 leading-6">{androidReady ? "O APK pode visitar perfis para obter a contagem de seguidores. Essa leitura NÃO confirma se a pessoa segue você de volta: a segunda conferência é feita separadamente em Revisar." : "No Chrome Android comum, a automação não pode ler outras páginas. O APK também verifica somente a contagem, não a reciprocidade; confirme-a separadamente em Revisar."}</p>
             {androidReady && appSnapshotSavedAt ? (
               <p className="mt-2 text-xs font-black text-emerald-800">
                 Salvo no app: {new Date(appSnapshotSavedAt).toLocaleString("pt-BR")}
@@ -2110,7 +2168,7 @@ export function CleanupManager() {
             </div>
           </div>
         </div>
-        {tab === "protected" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredProtected.map((item) => <div key={item.username} className="flex items-center justify-between gap-3 px-3 py-3 sm:gap-4 sm:px-6 sm:py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">Protegido neste dispositivo</p></div><button type="button" onClick={() => removeProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"><X size={14} /> Remover proteção</button></div>)}{!filteredProtected.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil protegido.</div> : null}</div> : tab === "unavailable" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredUnavailable.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">{unavailableReasonLabel(item.reason)} · Fonte: {item.source === "import" ? "arquivo do Instagram" : item.source === "android" ? "APK Android" : "verificação automática"}</p></div>{!item.username.startsWith("__deleted__") ? <div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => openProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Testar perfil</button><button type="button" onClick={() => void reviewProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Revisar novamente</button></div> : null}</div>)}{!filteredUnavailable.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil indisponível identificado.</div> : null}</div> : <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{activeList.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-4"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-black text-slate-900">@{item.username}</p>{typeof item.followersCount === "number" ? <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.classification === "above_limit" ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>{item.followersCount.toLocaleString("pt-BR")} seguidores</span> : <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">contagem pendente</span>}</div><p className="mt-1 text-xs text-slate-500">{reviewFlags[item.username] ? "Leitura automática inconclusiva · " : ""}{item.reasons.join(" · ")} · Fonte: {sourceLabel(item.dataSource)}</p></div><div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => openProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Abrir perfil</button><button type="button" onClick={() => void reviewProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">{reviewFlags[item.username] ? "Revisar novamente" : "Revisar"}</button>{typeof item.followersCount !== "number" ? <button type="button" onClick={() => saveManualFollowers(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Informar seguidores</button> : null}<button type="button" onClick={() => addProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700"><ShieldCheck size={14} /> Proteger</button></div></div>)}{!activeList.length ? <div className="p-8 text-center text-sm text-slate-500">{tab === "priority" ? "Nenhum perfil com contagem conhecida está dentro do limite atual." : tab === "above" ? "Nenhum perfil conhecido está acima do limite atual." : "Nenhum perfil aguardando enriquecimento."}</div> : null}</div>}
+        {tab === "protected" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredProtected.map((item) => <div key={item.username} className="flex items-center justify-between gap-3 px-3 py-3 sm:gap-4 sm:px-6 sm:py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">Protegido neste dispositivo</p></div><button type="button" onClick={() => removeProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"><X size={14} /> Remover proteção</button></div>)}{!filteredProtected.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil protegido.</div> : null}</div> : tab === "unavailable" ? <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{filteredUnavailable.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-4"><div className="min-w-0"><p className="truncate font-black text-slate-900">@{item.username}</p><p className="mt-1 text-xs text-slate-500">{unavailableReasonLabel(item.reason)} · Fonte: {item.source === "import" ? "arquivo do Instagram" : item.source === "android" ? "APK Android" : "verificação automática"}</p></div>{!item.username.startsWith("__deleted__") ? <div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => openProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Testar perfil</button><button type="button" onClick={() => void reviewProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Revisar novamente</button></div> : null}</div>)}{!filteredUnavailable.length ? <div className="p-8 text-center text-sm text-slate-500">Nenhum perfil indisponível identificado.</div> : null}</div> : <div className="max-h-[38rem] divide-y divide-slate-100 overflow-auto">{activeList.slice(0, 1000).map((item) => <div key={item.username} className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-4"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-black text-slate-900">@{item.username}</p>{typeof item.followersCount === "number" ? <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.classification === "above_limit" ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>{item.followersCount.toLocaleString("pt-BR")} seguidores</span> : <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">contagem pendente</span>}</div><p className="mt-1 text-xs text-slate-500">{reviewFlags[item.username] ? "Leitura automática inconclusiva · " : ""}{item.reasons.join(" · ")} · Contagem: {sourceLabel(item.dataSource)} · Reciprocidade: {settings.reciprocityChecks[item.username]?.result === "not_following" && settings.reciprocityChecks[item.username]?.analysisCreatedAt === latest.createdAt ? "exportação + confirmação manual" : "segunda conferência pendente"}</p></div><div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => openProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={14} /> Abrir perfil</button><button type="button" onClick={() => void reviewProfile(item.username)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Revisar contagem</button><button type="button" onClick={() => void confirmReciprocity(item.username, "follows")} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">Confirmei: segue-me</button>{tab === "review" ? <button type="button" onClick={() => void confirmReciprocity(item.username, "not_following")} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">Conferi: não me segue</button> : null}{typeof item.followersCount !== "number" ? <button type="button" onClick={() => saveManualFollowers(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">Informar seguidores</button> : null}<button type="button" onClick={() => addProtected(item.username)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700"><ShieldCheck size={14} /> Proteger</button></div></div>)}{!activeList.length ? <div className="p-8 text-center text-sm text-slate-500">{tab === "priority" ? "Nenhum perfil com as duas verificações confirmadas está dentro do limite atual." : tab === "above" ? "Nenhum perfil conhecido está acima do limite atual." : "Nenhum perfil aguardando segunda conferência."}</div> : null}</div>}
       </section>
     </div>
     {restoreBackupDialog}

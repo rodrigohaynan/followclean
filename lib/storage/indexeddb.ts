@@ -256,6 +256,10 @@ export async function getCleanupSettings(): Promise<CleanupSettings> {
       typeof record?.maxFollowers === "number"
         ? record.maxFollowers
         : DEFAULT_CLEANUP_SETTINGS.maxFollowers,
+    reciprocityChecks:
+      record?.reciprocityChecks && typeof record.reciprocityChecks === "object"
+        ? record.reciprocityChecks
+        : {},
   };
 }
 
