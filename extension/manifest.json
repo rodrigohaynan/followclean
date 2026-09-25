@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "FollowClean Assist",
-  "version": "0.4.2",
-  "description": "Enriquece a fila do FollowClean enquanto você revisa perfis no Instagram.",
+  "version": "0.4.3",
+  "description": "Revisa somente perfis da conta Instagram vinculada, com fila e resultados isolados.",
   "permissions": [
     "storage",
     "tabs",
