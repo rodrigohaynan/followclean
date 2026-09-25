@@ -141,17 +141,18 @@ export async function migrateLegacyForAccount() {
       const relevant = new Set(ownedAnalyses.flatMap((record) =>
         [...record.analysis.followers, ...record.analysis.following].map((value) => value.toLowerCase()),
       ));
+      const exclusivelyOwned = ownedAnalyses.length === analyses.length;
       const write = scoped.transaction(
         [ANALYSES_STORE, PROTECTED_STORE, SETTINGS_STORE, PROFILE_METADATA_STORE],
         "readwrite",
       );
       for (const record of ownedAnalyses) write.objectStore(ANALYSES_STORE).put(record);
       for (const row of protectedRows) {
-        if (relevant.has(row.username.toLowerCase())) write.objectStore(PROTECTED_STORE).put(row);
+        if (exclusivelyOwned || relevant.has(row.username.toLowerCase())) write.objectStore(PROTECTED_STORE).put(row);
       }
       if (settings) write.objectStore(SETTINGS_STORE).put(settings);
       for (const row of metadata) {
-        if (relevant.has(row.username.toLowerCase())) write.objectStore(PROFILE_METADATA_STORE).put(row);
+        if (exclusivelyOwned || relevant.has(row.username.toLowerCase())) write.objectStore(PROFILE_METADATA_STORE).put(row);
       }
       await new Promise<void>((resolve, reject) => {
         write.oncomplete = () => resolve();
