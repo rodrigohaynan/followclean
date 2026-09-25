@@ -1039,7 +1039,7 @@ export function CleanupManager() {
     window.addEventListener("message", handleMessage);
     // Both scanner and extension must prove their active Instagram account
     // before sending any results from their previously cached queues.
-    window.postMessage({ source: "followclean-web", type: "PING", ownerId: account.id }, "*");
+    if (account) window.postMessage({ source: "followclean-web", type: "PING", ownerId: account.id }, "*");
 
     const bridge = (window as Window & {
       FollowCleanAndroid?: { postMessage: (message: string) => void };
