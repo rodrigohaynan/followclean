@@ -24,3 +24,10 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Package FollowClean Assist 0.4.3
+        uses: actions/upload-artifact@v4
+        with:
+          name: FollowClean-Assist-0.4.3
+          path: extension/
+          if-no-files-found: error
