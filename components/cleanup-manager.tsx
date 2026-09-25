@@ -1916,7 +1916,8 @@ export function CleanupManager() {
 
   // Recheck a whole section without deleting its previous counts or protections.
   const sectionRecheckUsernames = useMemo(() => {
-    const candidates = tab === "priority" ? priority.map((item) => item.username)
+    const candidates = tab === "possible" ? possibleEligible
+      : tab === "priority" ? priority.map((item) => item.username)
       : tab === "review" ? review.map((item) => item.username)
       : tab === "above" ? aboveLimit.map((item) => item.username)
       : tab === "protected" ? protectedProfiles.map((item) => item.username)
@@ -1924,12 +1925,21 @@ export function CleanupManager() {
     return Array.from(new Set(candidates
       .map((value) => value.trim().toLowerCase().replace(/^@/, ""))
       .filter((value) => /^[a-z0-9._]{1,30}$/.test(value) && !value.startsWith("__deleted__"))));
-  }, [tab, priority, review, aboveLimit, protectedProfiles, unavailable]);
+  }, [tab, possibleEligible, priority, review, aboveLimit, protectedProfiles, unavailable]);
 
   function recheckAllInSection() {
     if (batchRunning || bulkRecheckBusy) return;
-    const usernames = sectionRecheckUsernames;
+    // Instagram may ask for login after repeated visits. Use small, explicit
+    // batches for the complete review instead of opening thousands at once.
+    const usernames = tab === "possible"
+      ? sectionRecheckUsernames.slice(possibleBatchCursor, possibleBatchCursor + 50)
+      : sectionRecheckUsernames;
     if (!usernames.length) {
+      if (tab === "possible" && sectionRecheckUsernames.length) {
+        setPossibleBatchCursor(0);
+        setExtensionNote("Todos os lotes foram preparados. Volte ao início para uma nova revisão.");
+        return;
+      }
       setExtensionNote("Nenhum perfil verificável nesta seção.");
       return;
     }
@@ -1938,11 +1948,11 @@ export function CleanupManager() {
       return;
     }
     const labels: Record<Tab, string> = {
-      priority: "Prioridade", review: "Revisar", above: "Acima do limite",
+      possible: "Possíveis não seguidores", priority: "Prioridade", review: "Revisar", above: "Acima do limite",
       protected: "Protegidos", unavailable: "Indisponíveis",
     };
     if (!window.confirm(
-      `Revisar todos os ${usernames.length.toLocaleString("pt-BR")} perfis da seção ${labels[tab]}? As leituras antigas serão preservadas até que novas leituras sejam concluídas. Perfis protegidos continuarão protegidos. A operação pode demorar e respeita as pausas do scanner.`
+      `Revisar ${usernames.length.toLocaleString("pt-BR")} perfis de ${labels[tab]}? A exportação pode estar desatualizada e o scanner só atualiza a contagem, não confirma reciprocidade. ${batchResumeAvailable ? "A fila anterior pausada será substituída. " : ""}Os resultados já salvos e protegidos serão preservados. A revisão respeita as pausas do scanner.`
     )) return;
     setBulkRecheckBusy(true);
     setBatchQueueTotal(usernames.length);
@@ -1960,9 +1970,10 @@ export function CleanupManager() {
       } else if (extensionReady) {
         window.postMessage({
           source: "followclean-web", type: "SET_QUEUE_AND_START",
-          usernames, forceRecheck: true,
+          ownerId: account?.id, usernames, forceRecheck: true,
         }, "*");
       }
+      if (tab === "possible") setPossibleBatchCursor((current) => current + usernames.length);
     } catch {
       setExtensionNote("Não foi possível iniciar a revisão. Os registros anteriores foram preservados.");
     } finally {
