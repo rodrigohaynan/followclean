@@ -120,6 +120,8 @@ export function CleanupManager() {
   const [initialFilter, setInitialFilter] = useState<InitialFilter>("all");
   const [extensionReady, setExtensionReady] = useState(false);
   const [androidReady, setAndroidReady] = useState(false);
+  const [androidVersion, setAndroidVersion] = useState("");
+  const [batchResumeAvailable, setBatchResumeAvailable] = useState(false);
   const [extensionNote, setExtensionNote] = useState("Aguardando integração...");
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchCurrent, setBatchCurrent] = useState<string | null>(null);
@@ -384,8 +386,10 @@ export function CleanupManager() {
           processedThisRun?: unknown;
           queueTotal?: unknown;
           lastMessage?: unknown;
+          resumeAvailable?: unknown;
         } | null;
         snapshot?: unknown;
+        version?: unknown;
         usernames?: unknown;
         value?: unknown;
         ok?: unknown;
@@ -403,6 +407,7 @@ export function CleanupManager() {
       if (data.type === "READY") {
         if (fromAndroid) {
           setAndroidReady(true);
+          setAndroidVersion(typeof data.version === "string" ? data.version : "");
           setExtensionNote("Aplicativo Android detectado e pronto.");
           const bridge = (window as Window & {
             FollowCleanAndroid?: { postMessage: (message: string) => void };
@@ -722,6 +727,7 @@ export function CleanupManager() {
           void upsertProfileMetadataBatch([record]);
 
           if (data.batch) {
+            if (typeof data.batch.resumeAvailable === "boolean") setBatchResumeAvailable(data.batch.resumeAvailable);
             if (typeof data.batch.queueTotal === "number") setBatchQueueTotal(data.batch.queueTotal);
             setBatchRunning(Boolean(data.batch.running));
             setBatchCurrent(
@@ -829,7 +835,8 @@ export function CleanupManager() {
       }
 
       if (data.type === "BATCH_STATUS" && data.batch) {
-        if (typeof data.batch.queueTotal === "number") setBatchQueueTotal(data.batch.queueTotal);
+        if (typeof data.batch.resumeAvailable === "boolean") setBatchResumeAvailable(data.batch.resumeAvailable);
+            if (typeof data.batch.queueTotal === "number") setBatchQueueTotal(data.batch.queueTotal);
         setBatchRunning(Boolean(data.batch.running));
         const statusText =
           typeof data.batch.lastMessage === "string" ? data.batch.lastMessage : "";
@@ -888,7 +895,8 @@ export function CleanupManager() {
         }
 
         if (data.batch) {
-          if (typeof data.batch.queueTotal === "number") setBatchQueueTotal(data.batch.queueTotal);
+          if (typeof data.batch.resumeAvailable === "boolean") setBatchResumeAvailable(data.batch.resumeAvailable);
+            if (typeof data.batch.queueTotal === "number") setBatchQueueTotal(data.batch.queueTotal);
           setBatchRunning(Boolean(data.batch.running));
           setBatchCurrent(
             typeof data.batch.currentUsername === "string"
@@ -2070,6 +2078,11 @@ export function CleanupManager() {
   // can be running while pendingCountChecks is zero.
   const hasPendingCountChecks = pendingCountChecks.length > 0;
   const scannerPaused = /pausad|sem acesso|falha de rede|respondeu http|login\/verifica|checkpoint/i.test(batchLastMessage);
+  const scannerLoginRequired = androidReady &&
+    /instagram (?:solicitou|exibiu) login|instagram exibiu login/i.test(batchLastMessage);
+  const androidParts = androidVersion.split(".").map(Number);
+  const scannerSupportsLogin = (androidParts[0] || 0) * 10000 +
+    (androidParts[1] || 0) * 100 + (androidParts[2] || 0) >= 321;
   const scannerDone = /fila concluída/i.test(batchLastMessage);
   const scannerHasSession = batchQueueTotal > 0 && (batchRunning || scannerPaused || scannerDone);
   const scannerTotal = scannerHasSession
