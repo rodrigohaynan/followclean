@@ -1815,7 +1815,7 @@ export function CleanupManager() {
       void fetch("/api/cleanup/cloud/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: normalized }),
+        body: JSON.stringify({ ownerId: account?.id, username: normalized }),
       });
     }
 
@@ -1922,7 +1922,7 @@ export function CleanupManager() {
         const response = await fetch("/api/cleanup/cloud/queue", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ usernames }),
+          body: JSON.stringify({ ownerId: account?.id, usernames }),
         });
 
         if (!response.ok) {
