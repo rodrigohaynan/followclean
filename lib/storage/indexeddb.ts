@@ -133,15 +133,13 @@ export async function migrateLegacyForAccount() {
       if (!analyses.every((record) => exportBelongsToAccount(record.sourceFile, activeUsername!))) {
         return "quarantined" as const;
       }
-      const protectedRows = await requestToPromise(
-        tx.objectStore(PROTECTED_STORE).getAll() as IDBRequest<ProtectedProfile[]>,
-      );
-      const settings = await requestToPromise(
-        tx.objectStore(SETTINGS_STORE).get("cleanup") as IDBRequest<StoredCleanupSettings | undefined>,
-      );
-      const metadata = await requestToPromise(
-        tx.objectStore(PROFILE_METADATA_STORE).getAll() as IDBRequest<ProfileMetadata[]>,
-      );
+      // Queue every request before yielding; an IndexedDB transaction may
+      // auto-commit between separate awaited requests.
+      const [protectedRows, settings, metadata] = await Promise.all([
+        requestToPromise(tx.objectStore(PROTECTED_STORE).getAll() as IDBRequest<ProtectedProfile[]>),
+        requestToPromise(tx.objectStore(SETTINGS_STORE).get("cleanup") as IDBRequest<StoredCleanupSettings | undefined>),
+        requestToPromise(tx.objectStore(PROFILE_METADATA_STORE).getAll() as IDBRequest<ProfileMetadata[]>),
+      ]);
       const relevant = new Set(analyses.flatMap((record) =>
         [...record.analysis.followers, ...record.analysis.following].map((value) => value.toLowerCase()),
       ));
