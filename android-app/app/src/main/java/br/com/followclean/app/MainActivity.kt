@@ -1300,6 +1300,7 @@ class MainActivity : Activity() {
     }
 
     private fun sendBatchStatus(message: String) {
+        prefs.edit().putString("lastBatchMessage", message).apply()
         sendToWeb(
             JSONObject()
                 .put("source", "followclean-android")
@@ -1315,6 +1316,7 @@ class MainActivity : Activity() {
             .put("processedThisRun", processedThisRun)
             .put("queueTotal", queue.size)
             .put("resumeAvailable", !running && currentIndex < queue.size && queue.isNotEmpty())
+            .put("lastMessage", prefs.getString("lastBatchMessage", "") ?: "")
     }
 
     private fun sendToWeb(payload: JSONObject) {
