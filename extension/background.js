@@ -549,24 +549,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "FOLLOWCLEAN_PROFILE_CAPTURED") {
     const username = normalizeUsername(message.username);
-    if (!username) return;
+    const count = Number(message.followersCount);
+    if (!/^[a-z0-9._]{1,30}$/.test(username) ||
+        !Number.isSafeInteger(count) || count < 0 || count > 1_000_000_000) {
+      sendResponse({ ok: false });
+      return false;
+    }
 
     void (async () => {
       const state = await getState();
-      if (!state.account || !state.batch.running ||
-          sender.tab?.id !== state.batch.tabId ||
-          username !== state.batch.currentUsername) return;
-
+      if (!state.account || !state.queue.includes(username) ||
+          !sender.tab?.url?.startsWith("https://www.instagram.com/" + username + "/")) {
+        return { ok: false, error: "Perfil fora da fila desta conta." };
+      }
+      const automatic = state.batch.running &&
+        sender.tab.id === state.batch.tabId &&
+        username === state.batch.currentUsername;
+      if (state.batch.running && !automatic) return { ok: false };
+      const results = state.results;
+      results[username] = {
+        username, followersCount: count,
+        parserVersion: Number(message.parserVersion || 2),
+        dataSource: "extension",
+        updatedAt: new Date().toISOString()
+      };
+      await setScoped({ followcleanResults: results }, state.account.ownerId);
       await clearFailure(username);
-      await finishCurrentProfile({
-        username,
-        status: "verified",
-        followersCount: Number(message.followersCount || 0),
-        parserVersion: Number(message.parserVersion || 2)
-      });
-    })();
-
-    sendResponse({ ok: true });
+      if (automatic) {
+        await finishCurrentProfile({
+          username, status: "verified", followersCount: count,
+          parserVersion: Number(message.parserVersion || 2)
+        });
+      } else if (state.forcedRechecks.includes(username)) {
+        await setScoped({
+          followcleanForcedRechecks: state.forcedRechecks.filter((item) => item !== username)
+        }, state.account.ownerId);
+      }
+      return { ok: true };
+    })().then(sendResponse).catch(() => sendResponse({ ok: false }));
     return true;
   }
 
