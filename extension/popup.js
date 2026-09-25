@@ -1,4 +1,5 @@
 let accountVerified = false;
+let displayedOwnerId = null;
 
 async function verifyCurrentSite() {
   try {
@@ -18,6 +19,7 @@ async function loadState() {
   const account = currentOwnerId && stored?.account?.ownerId === currentOwnerId
     ? stored.account : null;
   accountVerified = Boolean(account);
+  displayedOwnerId = account?.ownerId || null;
   const queue = account && Array.isArray(stored.queue) ? stored.queue : [];
   const results = account ? stored.results || {} : {};
   const failures = account ? stored.failures || {} : {};
@@ -116,7 +118,8 @@ async function openInstagramProfile(username) {
 
 document.getElementById("openNext").addEventListener("click", async (event) => {
   const username = event.currentTarget.dataset.username;
-  if (!username || !accountVerified || !(await verifyCurrentSite())) return;
+  if (!username || !accountVerified ||
+      (await verifyCurrentSite()) !== displayedOwnerId) return;
   await openInstagramProfile(username);
   window.close();
 });
@@ -135,7 +138,10 @@ loadState();
 
 document.getElementById("startBatch").addEventListener("click", async () => {
   const owner = await verifyCurrentSite();
-  if (!owner || !accountVerified) return;
+  if (!owner || !accountVerified || owner !== displayedOwnerId) {
+    await loadState();
+    return;
+  }
   const response = await chrome.runtime.sendMessage({
     type: "FOLLOWCLEAN_START_BATCH"
   });
