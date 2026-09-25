@@ -1,13 +1,30 @@
+let accountVerified = false;
+
+async function verifyCurrentSite() {
+  try {
+    const tabs = await chrome.tabs.query({ url: ["https://followclean.netlify.app/*"] });
+    for (const tab of tabs) {
+      if (!tab.id) continue;
+      const response = await chrome.tabs.sendMessage(tab.id, { type: "FOLLOWCLEAN_VERIFY_ACCOUNT" });
+      if (response?.ok && response.ownerId) return response.ownerId;
+    }
+  } catch {}
+  return null;
+}
+
 async function loadState() {
+  const currentOwnerId = await verifyCurrentSite();
   const stored = await chrome.runtime.sendMessage({ type: "FOLLOWCLEAN_GET_STATE" });
-  const account = stored?.account || null;
+  const account = currentOwnerId && stored?.account?.ownerId === currentOwnerId
+    ? stored.account : null;
+  accountVerified = Boolean(account);
   const queue = account && Array.isArray(stored.queue) ? stored.queue : [];
   const results = account ? stored.results || {} : {};
   const failures = account ? stored.failures || {} : {};
   const cloudConfigured = Boolean(account && stored.cloudConfigured);
   document.getElementById("accountName").textContent =
     account ? "Conta vinculada: @" + account.username :
-      "Nenhuma conta vinculada. Abra o FollowClean com a conta desejada.";
+      "Abra o FollowClean na conta desejada para validar a fila. Os dados anteriores continuam preservados.";
   const pending = queue.filter((username) => {
     const result = results[username];
     const validResult = result && Number(result.parserVersion || 0) >= 2;
@@ -99,7 +116,7 @@ async function openInstagramProfile(username) {
 
 document.getElementById("openNext").addEventListener("click", async (event) => {
   const username = event.currentTarget.dataset.username;
-  if (!username) return;
+  if (!username || !accountVerified || !(await verifyCurrentSite())) return;
   await openInstagramProfile(username);
   window.close();
 });
@@ -117,6 +134,8 @@ loadState();
 
 
 document.getElementById("startBatch").addEventListener("click", async () => {
+  const owner = await verifyCurrentSite();
+  if (!owner || !accountVerified) return;
   const response = await chrome.runtime.sendMessage({
     type: "FOLLOWCLEAN_START_BATCH"
   });
