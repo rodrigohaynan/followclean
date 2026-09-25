@@ -4,10 +4,15 @@ let displayedOwnerId = null;
 async function verifyCurrentSite() {
   try {
     const tabs = await chrome.tabs.query({ url: ["https://followclean.netlify.app/*"] });
+    tabs.sort((a, b) => Number(Boolean(b.active)) - Number(Boolean(a.active)));
     for (const tab of tabs) {
       if (!tab.id) continue;
-      const response = await chrome.tabs.sendMessage(tab.id, { type: "FOLLOWCLEAN_VERIFY_ACCOUNT" });
-      if (response?.ok && response.ownerId) return response.ownerId;
+      try {
+        const response = await chrome.tabs.sendMessage(tab.id, { type: "FOLLOWCLEAN_VERIFY_ACCOUNT" });
+        if (response?.ok && response.ownerId) return response.ownerId;
+      } catch {
+        // Another matching tab may still be loading or may lack the content script.
+      }
     }
   } catch {}
   return null;
