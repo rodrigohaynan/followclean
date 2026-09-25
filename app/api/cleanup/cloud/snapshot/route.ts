@@ -139,9 +139,18 @@ export async function POST(request: NextRequest) {
   // Merge by confirmation date instead of allowing a stale upload to erase
   // a "follows" safety decision stored in the cloud.
   const previous = await sql.query(
-    "SELECT settings FROM followclean_cleanup_snapshot WHERE owner_id = $1",
+    "SELECT settings, source_file FROM followclean_cleanup_snapshot WHERE owner_id = $1",
     [identity.ownerId],
   );
+  const previousMatch = typeof previous[0]?.source_file === "string"
+    ? previous[0].source_file.match(/^instagram-([a-z0-9._]+)-\d{4}-\d{2}-\d{2}(?:-|\.|$)/i)
+    : null;
+  if (previous.length && (!previousMatch ||
+      previousMatch[1].toLowerCase() !== identity.username)) {
+    // Preserve the contaminated legacy checkpoint and queue for recovery.
+    // Do not merge its old protections into the new account.
+    return NextResponse.json({ error: "legacy_cloud_quarantined" }, { status: 409 });
+  }
   const storedSettings = previous[0]?.settings &&
     typeof previous[0].settings === "object"
       ? previous[0].settings as Record<string, unknown>
