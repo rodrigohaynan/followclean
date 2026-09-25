@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
     : null;
   // A previously contaminated cloud checkpoint is quarantined, including its
   // related queue. Do not delete any legacy cloud records automatically.
-  if (snapshotRows[0] && (!match || match[1].toLowerCase() !== identity.username)) {
+  if (rows.length && (!snapshotRows[0] || !match || match[1].toLowerCase() !== identity.username)) {
     return NextResponse.json({
       configured: true, account: identity, quarantined: true,
       summary: null, rows: [], snapshot: null, devices: [],
@@ -86,7 +86,11 @@ export async function GET(request: NextRequest) {
     configured: true,
     account: identity,
     summary,
-    rows,
+    rows: rows.filter((row) => {
+      const analysis = snapshotRows[0]?.analysis as { following?: string[] } | undefined;
+      return Array.isArray(analysis?.following) &&
+        analysis.following.includes(String(row.username).toLowerCase());
+    }),
     snapshot: snapshotRows[0] ?? null,
     devices,
   });
