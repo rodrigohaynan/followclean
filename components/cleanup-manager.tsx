@@ -27,6 +27,7 @@ import {
   salvageFollowCleanBackup,
 } from "@/lib/storage/backup";
 import { useAccountStorage, fetchActiveAccount } from "@/lib/storage/account-client";
+import { possibleReviewCandidates } from "@/lib/rules/possible-review";
 import {
   exportBelongsToAccount,
   exportNamesAnotherAccount,
@@ -138,7 +139,7 @@ export function CleanupManager() {
   const [bulkReviewBusy, setBulkReviewBusy] = useState(false);
   const [bulkRecheckBusy, setBulkRecheckBusy] = useState(false);
   const [possiblePageSize, setPossiblePageSize] = useState(100);
-  const [possibleBatchCursor, setPossibleBatchCursor] = useState(0);
+  const [possibleBatchSent, setPossibleBatchSent] = useState<string[]>([]);
   const [networkPauseNote, setNetworkPauseNote] = useState("");
   const [extensionFailures, setExtensionFailures] = useState<UnavailableProfile[]>([]);
   const [cloudConfigured, setCloudConfigured] = useState(false);
@@ -1212,20 +1213,14 @@ export function CleanupManager() {
     () => new Set(unavailable.map((item) => item.username)),
     [unavailable],
   );
-  // Keep the raw export candidates visible even when all category counters
-  // are zero or when an earlier offline scan marked them as unavailable.
-  // This is a review list, NOT a claim that these accounts do not follow back.
-  const possibleUsernames = useMemo(() => {
-    if (!latest) return [];
-    return Array.from(new Set(latest.analysis.notFollowingBack
-      .map((username) => username.trim().toLowerCase().replace(/^@/, ""))
-      .filter((username) =>
-        /^[a-z0-9._]{1,30}$/.test(username) &&
-        !username.startsWith("__deleted__"))
-    )).sort((a, b) => a.localeCompare(b));
-  }, [latest]);
+  // From the export, retain candidates with unknown counts or a usable
+  // count <= X. A previously verified count above X does not enter this list
+  // or its recheck batches, even if an older scan marked it unavailable.
+  const possibleUsernames = useMemo(() => latest
+    ? possibleReviewCandidates(latest.analysis.notFollowingBack, profileMetadata, settings.maxFollowers)
+    : [], [latest, profileMetadata, settings.maxFollowers]);
   useEffect(() => {
-    setPossibleBatchCursor(0);
+    setPossibleBatchSent([]);
   }, [account?.id, latest?.createdAt]);
 
   const possibleEligible = useMemo(
@@ -1235,6 +1230,10 @@ export function CleanupManager() {
     ),
     [possibleUsernames, protectedSet, settings.reciprocityChecks],
   );
+  const possibleRemaining = useMemo(() => {
+    const sent = new Set(possibleBatchSent);
+    return possibleEligible.filter((username) => !sent.has(username));
+  }, [possibleEligible, possibleBatchSent]);
   const possibleByName = useMemo(
     () => new Map(queue.map((item) => [item.username.toLowerCase(), item] as const)),
     [queue],
@@ -1936,11 +1935,11 @@ export function CleanupManager() {
     // Instagram may ask for login after repeated visits. Use small, explicit
     // batches for the complete review instead of opening thousands at once.
     const usernames = tab === "possible"
-      ? sectionRecheckUsernames.slice(possibleBatchCursor, possibleBatchCursor + 50)
+      ? possibleRemaining.slice(0, 50)
       : sectionRecheckUsernames;
     if (!usernames.length) {
       if (tab === "possible" && sectionRecheckUsernames.length) {
-        setPossibleBatchCursor(0);
+        setPossibleBatchSent([]);
         setExtensionNote("Todos os lotes foram preparados. Volte ao início para uma nova revisão.");
         return;
       }
@@ -1977,7 +1976,7 @@ export function CleanupManager() {
           ownerId: account?.id, usernames, forceRecheck: true,
         }, "*");
       }
-      if (tab === "possible") setPossibleBatchCursor((current) => current + usernames.length);
+      if (tab === "possible") setPossibleBatchSent((current) => Array.from(new Set([...current, ...usernames])));
     } catch {
       setExtensionNote("Não foi possível iniciar a revisão. Os registros anteriores foram preservados.");
     } finally {
@@ -2290,7 +2289,7 @@ export function CleanupManager() {
         <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-blue-700">Acima do limite</p><p className="mt-2 text-3xl font-black text-blue-950">{aboveLimit.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-blue-700/70">Não segue + mais de {settings.maxFollowers.toLocaleString("pt-BR")}</p></div>
         <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-slate-500">Protegidos</p><p className="mt-2 text-3xl font-black text-slate-950">{protectedProfiles.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-slate-400">Nunca entram na fila</p></div>
         <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-violet-700">Indisponíveis</p><p className="mt-2 text-3xl font-black text-violet-950">{unavailable.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-violet-700/70">Removidos da fila principal</p></div>
-        <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-blue-800">Possíveis não seguidores</p><p className="mt-2 text-3xl font-black text-blue-950">{possibleUsernames.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-blue-700">Todos os perfis da exportação, inclusive indisponíveis e acima do limite</p><button type="button" onClick={() => { setTab("possible"); setInitialFilter("all"); setQuery(""); document.getElementById("followclean-profile-lists")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="mt-3 w-full rounded-xl bg-blue-700 px-3 py-2.5 text-sm font-black text-white">Revisar todos os possíveis</button></div>
+        <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-blue-800">Possíveis não seguidores</p><p className="mt-2 text-3xl font-black text-blue-950">{possibleUsernames.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-blue-700">Contagens desconhecidas ou até {settings.maxFollowers.toLocaleString("pt-BR")} seguidores · acima do limite ficam fora desta revisão</p><button type="button" onClick={() => { setTab("possible"); setInitialFilter("all"); setQuery(""); document.getElementById("followclean-profile-lists")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="mt-3 w-full rounded-xl bg-blue-700 px-3 py-2.5 text-sm font-black text-white">Revisar todos os possíveis</button></div>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-[2rem] sm:p-6">
@@ -2505,19 +2504,19 @@ export function CleanupManager() {
             <div className="min-w-0">
               <p className="text-sm font-black text-blue-950">{tab === "possible" ? "Revisão de todos os possíveis não seguidores" : "Nova verificação da seção"}</p>
               <p className="text-xs leading-5 text-blue-800">{tab === "possible"
-                ? `${sectionRecheckUsernames.length.toLocaleString("pt-BR")} candidatos revisáveis · ${Math.min(possibleBatchCursor, sectionRecheckUsernames.length).toLocaleString("pt-BR")} enviados nesta sessão. A revisão automática funciona em lotes de até 50 para respeitar pausas do Instagram; a lista manual abaixo permite acessar todos, inclusive perfis marcados como indisponíveis. A contagem não confirma reciprocidade.`
+                ? `${sectionRecheckUsernames.length.toLocaleString("pt-BR")} candidatos revisáveis (sem contagem acima de ${settings.maxFollowers.toLocaleString("pt-BR")} seguidores) · ${possibleBatchSent.length.toLocaleString("pt-BR")} enviados nesta sessão · ${possibleRemaining.length.toLocaleString("pt-BR")} ainda elegíveis. A revisão automática funciona em lotes de até 50; resultados acima do limite saem automaticamente da fila. A contagem não confirma reciprocidade.`
                 : `${sectionRecheckUsernames.length.toLocaleString("pt-BR")} perfis · toda a categoria, independentemente do filtro alfabético ou busca. Resultados anteriores preservados até a nova consulta.`}</p>
             </div>
             <button type="button" onClick={recheckAllInSection}
-              disabled={batchRunning || bulkRecheckBusy || (!androidReady && !extensionReady) || sectionRecheckUsernames.length === 0 || (tab === "possible" && possibleBatchCursor >= sectionRecheckUsernames.length)}
+              disabled={batchRunning || bulkRecheckBusy || (!androidReady && !extensionReady) || sectionRecheckUsernames.length === 0 || (tab === "possible" && possibleRemaining.length === 0)}
               className="min-h-11 rounded-xl bg-blue-700 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">
               {bulkRecheckBusy ? "Preparando..." : tab === "possible"
-                ? possibleBatchCursor >= sectionRecheckUsernames.length
+                ? possibleRemaining.length === 0
                   ? "Lotes enviados"
-                  : `Revisar próximo lote (${Math.min(50, sectionRecheckUsernames.length - possibleBatchCursor)})`
+                  : `Revisar próximo lote (${Math.min(50, possibleRemaining.length)})`
                 : `Revisar todos (${sectionRecheckUsernames.length.toLocaleString("pt-BR")})`}
             </button>
-            {tab === "possible" && possibleBatchCursor >= sectionRecheckUsernames.length && sectionRecheckUsernames.length > 0 ? <button type="button" onClick={() => setPossibleBatchCursor(0)} className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-xs font-bold text-blue-800">Recomeçar lotes</button> : null}
+            {tab === "possible" && possibleRemaining.length === 0 && sectionRecheckUsernames.length > 0 ? <button type="button" onClick={() => setPossibleBatchSent([])} className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-xs font-bold text-blue-800">Recomeçar lotes</button> : null}
             {!androidReady && !extensionReady ? <p className="w-full text-xs text-blue-800">A lista manual permanece disponível abaixo. Para a leitura automática, conecte o APK ou a extensão atualizada.</p> : null}
             {batchResumeAvailable && !batchRunning && tab === "possible" ? <p className="w-full text-xs font-semibold text-amber-800">Há um lote antigo pausado. Você pode continuar revisando os perfis manualmente ou retomar o lote no scanner. Iniciar um novo lote substituirá a fila antiga, preservando as contagens salvas.</p> : null}
           </div>
@@ -2573,7 +2572,7 @@ export function CleanupManager() {
               <p className="font-black">Revisão manual de todos os possíveis não seguidores</p>
               <p>
                 {filteredPossible.length.toLocaleString("pt-BR")} perfis nesta seleção · exibindo {Math.min(possiblePageSize, filteredPossible.length).toLocaleString("pt-BR")}.
-                A lista vem da exportação desta conta e inclui perfis antes classificados como indisponíveis ou acima do limite.
+                A lista vem da exportação desta conta e inclui perfis antes classificados como indisponíveis, desde que não tenham contagem válida acima de {settings.maxFollowers.toLocaleString("pt-BR")} seguidores. Contas acima do limite permanecem na categoria Acima do limite.
                 A exportação pode estar desatualizada: abra o Instagram e confira a reciprocidade antes de deixar de seguir.
                 Nenhum unfollow é realizado automaticamente.
               </p>
