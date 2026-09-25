@@ -134,17 +134,18 @@ export async function migrateLegacyForAccount() {
         requestToPromise(tx.objectStore(PROFILE_METADATA_STORE).getAll() as IDBRequest<ProfileMetadata[]>),
       ]);
       if (!analyses.length) return "empty" as const;
-      if (!analyses.every((record) => exportBelongsToAccount(record.sourceFile, activeUsername!))) {
-        return "quarantined" as const;
-      }
-      const relevant = new Set(analyses.flatMap((record) =>
+      const ownedAnalyses = analyses.filter((record) =>
+        exportBelongsToAccount(record.sourceFile, activeUsername!),
+      );
+      if (!ownedAnalyses.length) return "quarantined" as const;
+      const relevant = new Set(ownedAnalyses.flatMap((record) =>
         [...record.analysis.followers, ...record.analysis.following].map((value) => value.toLowerCase()),
       ));
       const write = scoped.transaction(
         [ANALYSES_STORE, PROTECTED_STORE, SETTINGS_STORE, PROFILE_METADATA_STORE],
         "readwrite",
       );
-      for (const record of analyses) write.objectStore(ANALYSES_STORE).put(record);
+      for (const record of ownedAnalyses) write.objectStore(ANALYSES_STORE).put(record);
       for (const row of protectedRows) {
         if (relevant.has(row.username.toLowerCase())) write.objectStore(PROTECTED_STORE).put(row);
       }
@@ -157,7 +158,7 @@ export async function migrateLegacyForAccount() {
         write.onerror = () => reject(write.error);
         write.onabort = () => reject(write.error);
       });
-      return "migrated" as const;
+      return ownedAnalyses.length === analyses.length ? "migrated" as const : "migrated_partial" as const;
     } finally {
       legacy.close();
     }
