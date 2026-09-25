@@ -126,20 +126,17 @@ export async function migrateLegacyForAccount() {
         [ANALYSES_STORE, PROTECTED_STORE, SETTINGS_STORE, PROFILE_METADATA_STORE],
         "readonly",
       );
-      const analyses = await requestToPromise(
-        tx.objectStore(ANALYSES_STORE).getAll() as IDBRequest<StoredAnalysis[]>,
-      );
-      if (!analyses.length) return "empty" as const;
-      if (!analyses.every((record) => exportBelongsToAccount(record.sourceFile, activeUsername!))) {
-        return "quarantined" as const;
-      }
-      // Queue every request before yielding; an IndexedDB transaction may
-      // auto-commit between separate awaited requests.
-      const [protectedRows, settings, metadata] = await Promise.all([
+      // Submit ALL readonly requests while the transaction is still active.
+      const [analyses, protectedRows, settings, metadata] = await Promise.all([
+        requestToPromise(tx.objectStore(ANALYSES_STORE).getAll() as IDBRequest<StoredAnalysis[]>),
         requestToPromise(tx.objectStore(PROTECTED_STORE).getAll() as IDBRequest<ProtectedProfile[]>),
         requestToPromise(tx.objectStore(SETTINGS_STORE).get("cleanup") as IDBRequest<StoredCleanupSettings | undefined>),
         requestToPromise(tx.objectStore(PROFILE_METADATA_STORE).getAll() as IDBRequest<ProfileMetadata[]>),
       ]);
+      if (!analyses.length) return "empty" as const;
+      if (!analyses.every((record) => exportBelongsToAccount(record.sourceFile, activeUsername!))) {
+        return "quarantined" as const;
+      }
       const relevant = new Set(analyses.flatMap((record) =>
         [...record.analysis.followers, ...record.analysis.following].map((value) => value.toLowerCase()),
       ));
