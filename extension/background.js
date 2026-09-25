@@ -5,6 +5,78 @@ const COOLDOWN_MS = 5 * 60_000;
 
 const NEXT_ALARM = "followclean-next";
 const TIMEOUT_ALARM = "followclean-timeout";
+// Legacy global followcleanQueue / Results / Batch / Failures remain untouched
+// as recovery archives. Version 0.4.3 reads only account-scoped keys.
+const ACTIVE_ACCOUNT_KEY = "followcleanV2ActiveAccount";
+const SCOPED_KEYS = [
+  "followcleanQueue", "followcleanForcedRechecks", "followcleanResults",
+  "followcleanBatch", "followcleanFailures", "followcleanCloudAuth",
+  "followcleanQueueUpdatedAt"
+];
+
+function scopedName(ownerId, key) {
+  return `followcleanV2:${ownerId}:${key}`;
+}
+
+async function getActiveAccount() {
+  const stored = await chrome.storage.local.get(ACTIVE_ACCOUNT_KEY);
+  const account = stored[ACTIVE_ACCOUNT_KEY];
+  if (!account || !/^[a-zA-Z0-9_-]{1,100}$/.test(account.ownerId || "") ||
+      !/^[a-z0-9._]{1,30}$/.test(account.username || "")) return null;
+  return account;
+}
+
+async function getScoped(keys, ownerId = null) {
+  const id = ownerId || (await getActiveAccount())?.ownerId;
+  if (!id) return {};
+  const stored = await chrome.storage.local.get(keys.map((key) => scopedName(id, key)));
+  return Object.fromEntries(keys.map((key) => [key, stored[scopedName(id, key)]]));
+}
+
+async function setScoped(data, ownerId = null) {
+  const id = ownerId || (await getActiveAccount())?.ownerId;
+  if (!id) throw new Error("Abra o FollowClean conectado para vincular a extensão.");
+  await chrome.storage.local.set(Object.fromEntries(
+    Object.entries(data).map(([key, value]) => [scopedName(id, key), value])
+  ));
+}
+
+async function removeScoped(keys, ownerId = null) {
+  const id = ownerId || (await getActiveAccount())?.ownerId;
+  if (!id) return;
+  await chrome.storage.local.remove(keys.map((key) => scopedName(id, key)));
+}
+
+async function bindAccount(account) {
+  if (!account || !/^[a-zA-Z0-9_-]{1,100}$/.test(account.ownerId || "") ||
+      !/^[a-z0-9._]{1,30}$/.test(account.username || "")) {
+    throw new Error("Conta Instagram não identificada.");
+  }
+  const old = await getActiveAccount();
+  if (old?.ownerId !== account.ownerId) {
+    // No old queue is run automatically after switching accounts. Global
+    // pre-0.4.3 keys are preserved but never imported into a new account.
+    await clearAlarms();
+    if (old) {
+      await setScoped({
+        followcleanBatch: {
+          ...(await getScoped(["followcleanBatch"], old.ownerId)).followcleanBatch,
+          running: false, currentUsername: null, tabId: null,
+          lastMessage: "Conta alterada; verificação pausada para evitar mistura."
+        }
+      }, old.ownerId);
+    }
+  }
+  await chrome.storage.local.set({
+    [ACTIVE_ACCOUNT_KEY]: {
+      ownerId: account.ownerId, username: account.username,
+      updatedAt: new Date().toISOString()
+    }
+  });
+  const state = await getState();
+  return { account: await getActiveAccount(), batch: state.batch,
+    queueTotal: state.queue.length, capturedTotal: Object.keys(state.results).length };
+}
 
 function normalizeUsername(value) {
   return String(value || "").trim().toLowerCase().replace(/^@/, "");
@@ -24,17 +96,10 @@ async function ensureDeviceId() {
 }
 
 async function getState() {
-  const stored = await chrome.storage.local.get([
-    "followcleanQueue",
-    "followcleanForcedRechecks",
-    "followcleanResults",
-    "followcleanBatch",
-    "followcleanFailures",
-    "followcleanCloudAuth",
-    "followcleanDeviceId"
-  ]);
-
+  const account = await getActiveAccount();
+  const stored = await getScoped(SCOPED_KEYS, account?.ownerId);
   return {
+    account,
     queue: Array.isArray(stored.followcleanQueue)
       ? stored.followcleanQueue.map(normalizeUsername).filter(Boolean)
       : [],
@@ -43,7 +108,7 @@ async function getState() {
       : [],
     results: stored.followcleanResults || {},
     failures: stored.followcleanFailures || {},
-    cloudAuth: stored.followcleanCloudAuth || null,
+    cloudAuth: account ? stored.followcleanCloudAuth || null : null,
     deviceId: stored.followcleanDeviceId || (await ensureDeviceId()),
     batch: stored.followcleanBatch || {
       running: false,
@@ -63,7 +128,7 @@ async function saveBatch(patch) {
     ...patch,
     updatedAt: new Date().toISOString()
   };
-  await chrome.storage.local.set({ followcleanBatch: batch });
+  await setScoped({ followcleanBatch: batch }, state.account?.ownerId);
   return batch;
 }
 
@@ -87,7 +152,8 @@ async function scheduleTimeout() {
 }
 
 async function nextPendingLocal() {
-  const { queue, results, failures, forcedRechecks } = await getState();
+  const { account, queue, results, failures, forcedRechecks } = await getState();
+  if (!account) return null;
   const forced = new Set(forcedRechecks);
   return (
     queue.find((username) => {
@@ -103,7 +169,8 @@ async function cloudRequest(path, options = {}) {
   const state = await getState();
   const cloud = state.cloudAuth;
 
-  if (!cloud?.configured || !cloud?.token) {
+  if (!state.account || !cloud?.configured || !cloud?.token ||
+      cloud.ownerId !== state.account.ownerId) {
     return { enabled: false, ok: false, data: null };
   }
 
@@ -215,14 +282,14 @@ async function markFailure(username, reason) {
     reason,
     updatedAt: new Date().toISOString()
   };
-  await chrome.storage.local.set({ followcleanFailures: state.failures });
+  await setScoped({ followcleanFailures: state.failures }, state.account?.ownerId);
 }
 
 async function clearFailure(username) {
   const state = await getState();
   if (!state.failures[username]) return;
   delete state.failures[username];
-  await chrome.storage.local.set({ followcleanFailures: state.failures });
+  await setScoped({ followcleanFailures: state.failures }, state.account?.ownerId);
 }
 
 async function finishCurrentProfile({
@@ -249,9 +316,9 @@ async function finishCurrentProfile({
   }
 
   if (state.forcedRechecks.includes(username)) {
-    await chrome.storage.local.set({
+    await setScoped({
       followcleanForcedRechecks: state.forcedRechecks.filter((value) => value !== username)
-    });
+    }, state.account?.ownerId);
   }
   await saveBatch({
     processedThisRun: processed,
@@ -280,7 +347,7 @@ async function finishCurrentProfile({
 
 async function processNext() {
   const state = await getState();
-  if (!state.batch.running) return;
+  if (!state.account || !state.batch.running) return;
 
   const next = await resolveNextUsername(state);
 
@@ -332,9 +399,10 @@ async function handleTimeout() {
 }
 
 async function startBatch(forceRecheckMode = false) {
-  await clearAlarms();
-
   const state = await getState();
+  if (!state.account) return { ok: false, error: "Conecte o Instagram no site FollowClean." };
+  if (!state.queue.length) return { ok: false, error: "Fila vazia para esta conta. Importe a exportação da conta atual e envie a fila novamente." };
+  await clearAlarms();
   await saveBatch({
     running: true,
     forceRecheckMode,
@@ -349,13 +417,36 @@ async function startBatch(forceRecheckMode = false) {
   });
 
   await processNext();
+  return { ok: true };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== "object") return;
 
+  if (message.type === "FOLLOWCLEAN_BIND_ACCOUNT") {
+    const allowed = sender.tab?.url?.startsWith("https://followclean.netlify.app/");
+    if (!allowed) {
+      sendResponse({ ok: false, error: "Vinculação permitida somente no FollowClean." });
+      return false;
+    }
+    void bindAccount(message.account)
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === "FOLLOWCLEAN_GET_STATE") {
+    void getState().then((state) => sendResponse({
+      ok: true, account: state.account, queue: state.queue,
+      results: state.results, failures: state.failures,
+      cloudConfigured: Boolean(state.cloudAuth?.configured),
+      batch: state.batch
+    }));
+    return true;
+  }
+
   if (message.type === "FOLLOWCLEAN_START_BATCH") {
-    void startBatch(Boolean(message.forceRecheck)).then(() => sendResponse({ ok: true }));
+    void startBatch(Boolean(message.forceRecheck)).then(sendResponse);
     return true;
   }
 
@@ -370,6 +461,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({
         ok: true,
         batch: state.batch,
+        account: state.account,
         cloudConfigured: Boolean(
           state.cloudAuth?.configured && state.cloudAuth?.token
         )
@@ -384,7 +476,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     void (async () => {
       const state = await getState();
-      if (!state.batch.running) return;
+      if (!state.account || !state.batch.running ||
+          sender.tab?.id !== state.batch.tabId ||
+          username !== state.batch.currentUsername) return;
 
       await markFailure(username, message.reason || "unavailable");
       await finishCurrentProfile({
@@ -404,7 +498,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     void (async () => {
       const state = await getState();
-      if (!state.batch.running) return;
+      if (!state.account || !state.batch.running ||
+          sender.tab?.id !== state.batch.tabId ||
+          username !== state.batch.currentUsername) return;
 
       await clearFailure(username);
       await finishCurrentProfile({
@@ -448,7 +544,12 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  void ensureDeviceId();
+  void (async () => {
+    await ensureDeviceId();
+    // The previous release stored an unscoped queue and might have left an
+    // alarm running. Stop it without touching its original saved records.
+    await clearAlarms();
+  })();
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -464,7 +565,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 void (async () => {
   const state = await getState();
-  if (state.batch.running) {
+  if (state.account && state.batch.running) {
     const alarms = await chrome.alarms.getAll();
     const hasNext = alarms.some((alarm) => alarm.name === NEXT_ALARM);
     const hasTimeout = alarms.some((alarm) => alarm.name === TIMEOUT_ALARM);
