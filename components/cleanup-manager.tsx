@@ -431,7 +431,12 @@ export function CleanupManager() {
       if (!fromExtension && !fromAndroid) return;
       // Version 0.4.3 binds each extension message to the authenticated account.
       // Reject older unscoped extension messages (they carry no ownerId).
-      if (fromExtension && data.ownerId !== account.id) return;
+      if (fromExtension && data.ownerId !== account.id) {
+        if (data.type === "READY") {
+          setExtensionNote("Extensão antiga detectada: desative a 0.4.2 no Chrome e instale a 0.4.3 para separar as contas.");
+        }
+        return;
+      }
       if (fromAndroid && data.type !== "READY" && data.type !== "ACCOUNT_READY" &&
           data.ownerId !== account.id) return;
 
