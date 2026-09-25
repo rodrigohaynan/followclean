@@ -26,6 +26,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.LinearLayout
+import android.widget.Button
 import android.widget.TextView
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
@@ -38,6 +39,9 @@ class MainActivity : Activity() {
     private lateinit var mainWebView: WebView
     private lateinit var scannerWebView: WebView
     private lateinit var statusView: TextView
+    private lateinit var root: LinearLayout
+    private lateinit var scannerLoginButton: Button
+    private var scannerLoginVisible = false
     private var lastStatusMessage = "Pronto"
     private var statusExpanded = false
 
@@ -96,7 +100,13 @@ class MainActivity : Activity() {
             alpha = 0.01f
         }
 
-        val root = LinearLayout(this).apply {
+        scannerLoginButton = Button(this).apply {
+            text = "Voltar ao FollowClean"
+            visibility = View.GONE
+            setOnClickListener { closeScannerLogin() }
+        }
+
+        root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.rgb(246, 248, 251))
             setOnApplyWindowInsetsListener { view, insets ->
@@ -117,6 +127,13 @@ class MainActivity : Activity() {
             }
             addView(
                 statusView,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+            addView(
+                scannerLoginButton,
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
@@ -500,10 +517,8 @@ class MainActivity : Activity() {
             loadsImagesAutomatically = false
             blockNetworkImage = true
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            userAgentString =
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
-                "FollowCleanScanner/0.2"
+            // Use a normal Android browser identity in the scanner WebView.
+            userAgentString = WebSettings.getDefaultUserAgent(this@MainActivity)
         }
 
         CookieManager.getInstance().setAcceptThirdPartyCookies(scannerWebView, true)
@@ -559,6 +574,72 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun showScannerLogin() {
+        if (running) {
+            sendBatchStatus("Pause o lote antes de abrir o Instagram do scanner.")
+            return
+        }
+        scannerLoginVisible = true
+        scannerWebView.settings.loadsImagesAutomatically = true
+        scannerWebView.settings.blockNetworkImage = false
+        // Sign in using the SAME WebView that performs the scan. A session
+        // in Chrome, the Instagram app or Meta OAuth is not this session.
+        mainWebView.visibility = View.GONE
+        scannerLoginButton.visibility = View.VISIBLE
+        scannerWebView.alpha = 1f
+        scannerWebView.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+        )
+        scannerWebView.requestFocus()
+        val currentUrl = scannerWebView.url.orEmpty()
+        if (!currentUrl.startsWith("https://www.instagram.com/") &&
+            !currentUrl.startsWith("https://instagram.com/")) {
+            scannerWebView.loadUrl("https://www.instagram.com/accounts/login/")
+        }
+        updateStatus("Instagram do scanner · entre nesta tela e toque em Voltar ao FollowClean.")
+    }
+
+    private fun closeScannerLogin() {
+        scannerLoginVisible = false
+        CookieManager.getInstance().flush()
+        scannerWebView.settings.loadsImagesAutomatically = false
+        scannerWebView.settings.blockNetworkImage = true
+        scannerWebView.clearFocus()
+        scannerWebView.alpha = 0.01f
+        scannerWebView.layoutParams = LinearLayout.LayoutParams(1, 1)
+        scannerLoginButton.visibility = View.GONE
+        mainWebView.visibility = View.VISIBLE
+        mainWebView.requestFocus()
+        updateStatus("Voltou ao FollowClean. Toque em Retomar lote para testar a sessão do scanner.")
+        sendBatchStatus("Login do scanner encerrado. Toque em Retomar lote para continuar.")
+    }
+
+    private fun resumeBatch() {
+        if (running) {
+            sendBatchStatus("O lote já está em execução.")
+            return
+        }
+        if (scannerLoginVisible) {
+            sendBatchStatus("Volte ao FollowClean antes de retomar a verificação.")
+            return
+        }
+        if (queue.isEmpty() || currentIndex >= queue.size) {
+            sendBatchStatus("Não há lote pausado a retomar. Use Revisar todos na seção desejada.")
+            return
+        }
+        if (!hasValidatedInternet()) {
+            sendBatchStatus("Sem acesso à internet. Lote permanece pausado.")
+            return
+        }
+        CookieManager.getInstance().flush()
+        running = true
+        currentUsername = null
+        persistState()
+        startVerificationForeground("Retomando lote de verificacao")
+        sendBatchStatus("Retomando lote pausado.")
+        processNext()
+    }
+
     private fun handleWebCommand(raw: String) {
         runCatching {
             val json = JSONObject(raw)
@@ -577,6 +658,8 @@ class MainActivity : Activity() {
                 "CLOUD_SYNCED" -> markCloudSynced()
                 "START_OAUTH" -> startInstagramOAuth()
                 "PAUSE_BATCH" -> pauseBatch("Pausado pelo usuário.")
+                "OPEN_SCANNER_LOGIN" -> showScannerLogin()
+                "RESUME_BATCH" -> resumeBatch()
                 "OPEN_PROFILE" -> openInstagramProfile(json.optString("username"))
                 "REVIEW_PROFILE" -> reviewProfile(json.optString("username"))
                 "START_BATCH" -> {
@@ -1002,7 +1085,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.18")
+                .put("version", "0.3.21")
                 .put("snapshotSavedAt", prefs.getString("app_snapshot_saved_at", null))
                 .put("cloudSyncPending", prefs.getBoolean("cloud_sync_pending", false))
                 .put("lastCloudSyncAt", prefs.getString("last_cloud_sync_at", null))
@@ -1217,6 +1300,7 @@ class MainActivity : Activity() {
     }
 
     private fun sendBatchStatus(message: String) {
+        prefs.edit().putString("lastBatchMessage", message).apply()
         sendToWeb(
             JSONObject()
                 .put("source", "followclean-android")
@@ -1231,6 +1315,8 @@ class MainActivity : Activity() {
             .put("currentUsername", currentUsername)
             .put("processedThisRun", processedThisRun)
             .put("queueTotal", queue.size)
+            .put("resumeAvailable", !running && currentIndex < queue.size && queue.isNotEmpty())
+            .put("lastMessage", prefs.getString("lastBatchMessage", "") ?: "")
     }
 
     private fun sendToWeb(payload: JSONObject) {
@@ -1380,7 +1466,9 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() {
-        if (mainWebView.canGoBack()) {
+        if (scannerLoginVisible) {
+            closeScannerLogin()
+        } else if (mainWebView.canGoBack()) {
             mainWebView.goBack()
         } else {
             super.onBackPressed()
