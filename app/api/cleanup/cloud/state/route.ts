@@ -64,7 +64,8 @@ export async function GET(request: NextRequest) {
     : null;
   // A previously contaminated cloud checkpoint is quarantined, including its
   // related queue. Do not delete any legacy cloud records automatically.
-  if (rows.length && (!snapshotRows[0] || !match || match[1].toLowerCase() !== identity.username)) {
+  if ((rows.length > 0 || Number(summary?.total ?? 0) > 0) &&
+      (!snapshotRows[0] || !match || match[1].toLowerCase() !== identity.username)) {
     return NextResponse.json({
       configured: true, account: identity, quarantined: true,
       summary: null, rows: [], snapshot: null, devices: [],
