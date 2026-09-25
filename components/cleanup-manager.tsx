@@ -155,6 +155,12 @@ export function CleanupManager() {
   const [restoreBackupStatus, setRestoreBackupStatus] = useState("");
 
   async function applyCloudState(state: Record<string, unknown>) {
+    if (state.quarantined === true) {
+      setCloudConfigured(false);
+      setCloudToken(null);
+      setCloudNote("Sincronização suspensa: checkpoint antigo possivelmente associado a outra conta. Dados preservados para recuperação.");
+      return;
+    }
     if (!account || (state?.account as { ownerId?: string } | null)?.ownerId !== account.id) {
       setCloudNote("Dados de outra conta recusados: reconecte o Instagram.");
       return;
@@ -162,7 +168,9 @@ export function CleanupManager() {
     const incomingSnapshot = state?.snapshot as { source_file?: string } | null;
     if (incomingSnapshot?.source_file &&
         !exportBelongsToAccount(incomingSnapshot.source_file, account.username)) {
-      setCloudNote("Checkpoint antigo sem propriedade confiável isolado. Nenhum dado foi importado.");
+      setCloudConfigured(false);
+      setCloudToken(null);
+      setCloudNote("Checkpoint antigo sem propriedade confiável isolado. Sincronização suspensa até revisão da nuvem.");
       return;
     }
     const summary = state?.summary as Record<string, unknown> | undefined;
