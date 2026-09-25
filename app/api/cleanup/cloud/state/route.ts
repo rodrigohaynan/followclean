@@ -58,6 +58,19 @@ export async function GET(request: NextRequest) {
     [identity.ownerId],
   );
 
+  const storedSource = snapshotRows[0]?.source_file;
+  const match = typeof storedSource === "string"
+    ? storedSource.match(/^instagram-([a-z0-9._]+)-\d{4}-\d{2}-\d{2}(?:-|\.|$)/i)
+    : null;
+  // A previously contaminated cloud checkpoint is quarantined, including its
+  // related queue. Do not delete any legacy cloud records automatically.
+  if (snapshotRows[0] && (!match || match[1].toLowerCase() !== identity.username)) {
+    return NextResponse.json({
+      configured: true, account: identity, quarantined: true,
+      summary: null, rows: [], snapshot: null, devices: [],
+    });
+  }
+
   const devices = await sql.query(
     `
       SELECT device_id, last_username, last_seen_at
