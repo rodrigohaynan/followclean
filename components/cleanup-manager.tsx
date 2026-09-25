@@ -2084,7 +2084,7 @@ export function CleanupManager() {
   const scannerSupportsLogin = (androidParts[0] || 0) * 10000 +
     (androidParts[1] || 0) * 100 + (androidParts[2] || 0) >= 321;
   const scannerDone = /fila concluída/i.test(batchLastMessage);
-  const scannerHasSession = batchQueueTotal > 0 && (batchRunning || scannerPaused || scannerDone);
+  const scannerHasSession = batchQueueTotal > 0 && (batchRunning || batchResumeAvailable || scannerPaused || scannerDone);
   const scannerTotal = scannerHasSession
     ? Math.max(batchQueueTotal, batchProcessed)
     : hasPendingCountChecks ? pendingCountChecks.length : 0;
@@ -2098,7 +2098,7 @@ export function CleanupManager() {
     ? "Sincronizando"
     : batchRunning
       ? "Verificando agora"
-      : scannerPaused
+      : (scannerPaused || batchResumeAvailable)
         ? "Pausado"
         : scannerDone
           ? "Concluído"
@@ -2109,7 +2109,7 @@ export function CleanupManager() {
               : "Aguardando conexão";
   const scannerStatusTone = batchRunning
     ? "bg-emerald-600 text-white"
-    : scannerPaused
+    : (scannerPaused || batchResumeAvailable)
       ? "bg-amber-100 text-amber-900"
       : syncBusy
         ? "bg-blue-600 text-white"
@@ -2146,7 +2146,7 @@ export function CleanupManager() {
             <button type="button" onClick={toggleRule} className={`inline-flex min-w-36 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition ${settings.notFollowingBack ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"}`}><CheckCircle2 size={17} /> {settings.notFollowingBack ? "Ativada" : "Desativada"}</button>
           </div>
         </div>
-        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-sm leading-6 sm:mt-5 sm:p-4 text-blue-950 sm:flex-row sm:items-center sm:justify-between"><span>A regra já entende a contagem de seguidores. A conexão oficial da Meta valida sua conta; a extensão assistida enriquece os perfis da fila.</span><Link href="/conectar" className="inline-flex shrink-0 items-center gap-2 font-black text-blue-700"><Instagram size={16} /> Instagram conectado</Link></div>
+        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-sm leading-6 sm:mt-5 sm:p-4 text-blue-950 sm:flex-row sm:items-center sm:justify-between"><span>A conexão oficial da Meta valida a conta vinculada, mas não autentica a sessão do scanner. Se o Instagram solicitar login durante a leitura, use o acesso do próprio scanner.</span><Link href="/conectar" className="inline-flex shrink-0 items-center gap-2 font-black text-blue-700"><Instagram size={16} /> Instagram conectado</Link></div>
         <div className="mt-3 grid gap-3 lg:grid-cols-3">
           <div className="flex min-w-0 min-h-[27.5rem] flex-col rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950 sm:min-h-[26rem]" aria-label="Scanner de seguidores">
             <div className="flex min-w-0 items-center justify-between gap-2">
@@ -2184,11 +2184,35 @@ export function CleanupManager() {
                 </div>
               </div>
             </div>
-            <p className="mt-3 h-5 min-w-0 truncate text-xs text-emerald-900/80" title={networkPauseNote || (batchRunning ? batchLastMessage || extensionNote : extensionNote)} aria-label={networkPauseNote ? "Aviso de rede" : "Progresso da verificação"}>
-              {networkPauseNote || (batchRunning ? batchLastMessage || extensionNote : !hasPendingCountChecks ? "Nenhuma contagem pendente. Confira os perfis da lista Prioridade antes do unfollow." : extensionNote)}
+            <p className="mt-3 h-5 min-w-0 truncate text-xs text-emerald-900/80" title={networkPauseNote || batchLastMessage || extensionNote} aria-label={networkPauseNote ? "Aviso de rede" : "Progresso da verificação"}>
+              {networkPauseNote || (batchResumeAvailable || batchRunning
+                ? batchLastMessage || extensionNote
+                : !hasPendingCountChecks
+                  ? "Nenhuma contagem pendente. Confira os perfis da lista Prioridade antes do unfollow."
+                  : extensionNote)}
             </p>
+            <div className="mt-2 flex h-[4.75rem] min-w-0 flex-col justify-center overflow-hidden rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs leading-5 text-amber-950" role="note">
+              {scannerLoginRequired
+                ? scannerSupportsLogin
+                  ? "O login no Instagram ou a conexão Meta não autentica automaticamente o scanner. Entre pela tela do Instagram do scanner e, depois, retome a fila salva."
+                  : "O scanner solicitou login. Atualize o APK para v0.3.21 para entrar na sessão de leitura e retomar a fila salva."
+                : batchResumeAvailable
+                  ? "A verificação foi pausada. Seus resultados e a fila foram preservados. Use Retomar lote quando estiver pronto."
+                  : "O scanner consulta apenas contagens de seguidores. Confira no Instagram antes de deixar de seguir alguém."}
+            </div>
             <div className="mt-auto grid grid-cols-2 gap-2 pt-4 sm:grid-cols-3">
-              {batchRunning || hasPendingCountChecks ? (
+              {scannerLoginRequired && scannerSupportsLogin ? (
+                <button type="button" onClick={() => androidBridge()?.postMessage(JSON.stringify({ type: "OPEN_SCANNER_LOGIN" }))}
+                  className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg bg-amber-600 px-2 py-2 text-xs font-black text-white">
+                  Entrar no Instagram do scanner
+                </button>
+              ) : scannerLoginRequired && !scannerSupportsLogin ? (
+                <a href="https://github.com/rodrigohaynan/followclean/actions" target="_blank" rel="noreferrer"
+                  className="inline-flex min-h-11 items-center justify-center rounded-lg bg-amber-600 px-2 py-2 text-center text-xs font-black text-white">Atualizar APK</a>
+              ) : batchResumeAvailable && !batchRunning && scannerSupportsLogin ? (
+                <button type="button" onClick={() => androidBridge()?.postMessage(JSON.stringify({ type: "RESUME_BATCH" }))}
+                  className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg bg-emerald-700 px-2 py-2 text-xs font-black text-white">Retomar lote</button>
+              ) : batchRunning || hasPendingCountChecks ? (
                 <button type="button" disabled={(!extensionReady && !androidReady) || batchRunning} onClick={startAutomaticVerification} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg fc-dark-action bg-slate-950 px-2 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40" title="Verificar apenas os perfis cuja quantidade de seguidores ainda é desconhecida">{batchRunning ? "Verificando..." : `Verificar contagens (${pendingCountChecks.length})`}</button>
               ) : (
                 <button type="button" onClick={() => { setTab("priority"); setInitialFilter("all"); setQuery(""); document.getElementById("followclean-profile-lists")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg bg-orange-600 px-2 py-2 text-xs font-black text-white" title="As contagens foram lidas. Confira reciprocidade individualmente antes do unfollow.">Ver perfis prioritários</button>
