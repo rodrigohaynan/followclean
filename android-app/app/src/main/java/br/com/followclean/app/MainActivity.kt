@@ -580,6 +580,8 @@ class MainActivity : Activity() {
             return
         }
         scannerLoginVisible = true
+        scannerWebView.settings.loadsImagesAutomatically = true
+        scannerWebView.settings.blockNetworkImage = false
         // Sign in using the SAME WebView that performs the scan. A session
         // in Chrome, the Instagram app or Meta OAuth is not this session.
         mainWebView.visibility = View.GONE
@@ -599,6 +601,9 @@ class MainActivity : Activity() {
 
     private fun closeScannerLogin() {
         scannerLoginVisible = false
+        CookieManager.getInstance().flush()
+        scannerWebView.settings.loadsImagesAutomatically = false
+        scannerWebView.settings.blockNetworkImage = true
         scannerWebView.clearFocus()
         scannerWebView.alpha = 0.01f
         scannerWebView.layoutParams = LinearLayout.LayoutParams(1, 1)
@@ -626,6 +631,7 @@ class MainActivity : Activity() {
             sendBatchStatus("Sem acesso à internet. Lote permanece pausado.")
             return
         }
+        CookieManager.getInstance().flush()
         running = true
         currentUsername = null
         persistState()
