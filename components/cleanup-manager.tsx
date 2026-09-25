@@ -120,7 +120,7 @@ export function CleanupManager() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [newProtected, setNewProtected] = useState("");
-  const [tab, setTab] = useState<Tab>("priority");
+  const [tab, setTab] = useState<Tab>("possible");
   const [initialFilter, setInitialFilter] = useState<InitialFilter>("all");
   const [extensionReady, setExtensionReady] = useState(false);
   const [androidReady, setAndroidReady] = useState(false);
@@ -1224,6 +1224,10 @@ export function CleanupManager() {
         !username.startsWith("__deleted__"))
     )).sort((a, b) => a.localeCompare(b));
   }, [latest]);
+  useEffect(() => {
+    setPossibleBatchCursor(0);
+  }, [account?.id, latest?.createdAt]);
+
   const possibleEligible = useMemo(
     () => possibleUsernames.filter((username) =>
       !protectedSet.has(username) &&
@@ -2286,7 +2290,7 @@ export function CleanupManager() {
         <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-blue-700">Acima do limite</p><p className="mt-2 text-3xl font-black text-blue-950">{aboveLimit.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-blue-700/70">Não segue + mais de {settings.maxFollowers.toLocaleString("pt-BR")}</p></div>
         <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-slate-500">Protegidos</p><p className="mt-2 text-3xl font-black text-slate-950">{protectedProfiles.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-slate-400">Nunca entram na fila</p></div>
         <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-violet-700">Indisponíveis</p><p className="mt-2 text-3xl font-black text-violet-950">{unavailable.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-violet-700/70">Removidos da fila principal</p></div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-slate-500">Possíveis não seguidores</p><p className="mt-2 text-3xl font-black text-slate-950">{latest.analysis.totals.notFollowingBack.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-slate-400">Na exportação; confira cada perfil antes do unfollow</p></div>
+        <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-blue-800">Possíveis não seguidores</p><p className="mt-2 text-3xl font-black text-blue-950">{possibleUsernames.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-blue-700">Todos os perfis da exportação, inclusive indisponíveis e acima do limite</p><button type="button" onClick={() => { setTab("possible"); setInitialFilter("all"); setQuery(""); document.getElementById("followclean-profile-lists")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="mt-3 w-full rounded-xl bg-blue-700 px-3 py-2.5 text-sm font-black text-white">Revisar todos os possíveis</button></div>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-[2rem] sm:p-6">
@@ -2366,7 +2370,7 @@ export function CleanupManager() {
               ) : batchRunning || hasPendingCountChecks ? (
                 <button type="button" disabled={(!extensionReady && !androidReady) || batchRunning} onClick={startAutomaticVerification} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg fc-dark-action bg-slate-950 px-2 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40" title="Verificar apenas os perfis cuja quantidade de seguidores ainda é desconhecida">{batchRunning ? "Verificando..." : `Verificar contagens (${pendingCountChecks.length})`}</button>
               ) : (
-                <button type="button" onClick={() => { setTab("priority"); setInitialFilter("all"); setQuery(""); document.getElementById("followclean-profile-lists")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg bg-orange-600 px-2 py-2 text-xs font-black text-white" title="As contagens foram lidas. Confira reciprocidade individualmente antes do unfollow.">Ver perfis prioritários</button>
+                <button type="button" onClick={() => { setTab("possible"); setInitialFilter("all"); setQuery(""); document.getElementById("followclean-profile-lists")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg bg-blue-700 px-2 py-2 text-xs font-black text-white" title="Acesse a lista de todos os possíveis não seguidores mesmo sem contagens pendentes.">Revisar possíveis</button>
               )}
               <button type="button" disabled={(!extensionReady && !androidReady) || !batchRunning} onClick={pauseAutomaticVerification} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-2 py-2 text-xs font-bold text-amber-900 disabled:cursor-not-allowed disabled:opacity-40">Pausar</button>
               <button type="button" disabled={syncBusy || (!extensionReady && !androidReady)} onClick={() => void syncExtensionResults()} className="col-span-2 inline-flex min-h-11 items-center justify-center rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 sm:col-span-1">{syncBusy ? "Sincronizando..." : "Sincronizar"}</button>
@@ -2449,7 +2453,8 @@ export function CleanupManager() {
         <div className="border-b border-slate-200 p-3 sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex w-full flex-nowrap gap-2 overflow-x-auto pb-1 lg:flex-wrap">
-              <button type="button" onClick={() => setTab("priority")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "priority" ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600"}`}>Prioridade confirmada ({priority.length.toLocaleString("pt-BR")})</button>
+              <button type="button" onClick={() => { setTab("possible"); setInitialFilter("all"); setQuery(""); }} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "possible" ? "bg-blue-700 text-white" : "bg-slate-100 text-slate-600"}`}>Todos os possíveis (${possibleUsernames.length.toLocaleString("pt-BR")})</button>
+              <button type="button" onClick={() => setTab("priority")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "priority" ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600"}`}>Prioridade ({priority.length.toLocaleString("pt-BR")})</button>
               <button type="button" onClick={() => setTab("review")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "review" ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>Revisar contagem ({review.length.toLocaleString("pt-BR")})</button>
               <button type="button" onClick={() => setTab("above")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "above" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>Acima do limite ({aboveLimit.length.toLocaleString("pt-BR")})</button>
               <button type="button" onClick={() => setTab("protected")} className={`min-h-10 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${tab === "protected" ? "fc-dark-action bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>Protegidos ({protectedProfiles.length.toLocaleString("pt-BR")})</button>
@@ -2498,15 +2503,23 @@ export function CleanupManager() {
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3">
             <div className="min-w-0">
-              <p className="text-sm font-black text-blue-950">Nova verificação da seção</p>
-              <p className="text-xs leading-5 text-blue-800">{sectionRecheckUsernames.length.toLocaleString("pt-BR")} perfis · toda a categoria, independentemente do filtro alfabético ou busca. Resultados anteriores preservados até a nova consulta.</p>
+              <p className="text-sm font-black text-blue-950">{tab === "possible" ? "Revisão de todos os possíveis não seguidores" : "Nova verificação da seção"}</p>
+              <p className="text-xs leading-5 text-blue-800">{tab === "possible"
+                ? `${sectionRecheckUsernames.length.toLocaleString("pt-BR")} candidatos revisáveis · ${Math.min(possibleBatchCursor, sectionRecheckUsernames.length).toLocaleString("pt-BR")} enviados nesta sessão. A revisão automática funciona em lotes de até 50 para respeitar pausas do Instagram; a lista manual abaixo permite acessar todos, inclusive perfis marcados como indisponíveis. A contagem não confirma reciprocidade.`
+                : `${sectionRecheckUsernames.length.toLocaleString("pt-BR")} perfis · toda a categoria, independentemente do filtro alfabético ou busca. Resultados anteriores preservados até a nova consulta.`}</p>
             </div>
             <button type="button" onClick={recheckAllInSection}
-              disabled={batchRunning || bulkRecheckBusy || (!androidReady && !extensionReady) || sectionRecheckUsernames.length === 0}
+              disabled={batchRunning || bulkRecheckBusy || (!androidReady && !extensionReady) || sectionRecheckUsernames.length === 0 || (tab === "possible" && possibleBatchCursor >= sectionRecheckUsernames.length)}
               className="min-h-11 rounded-xl bg-blue-700 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">
-              {bulkRecheckBusy ? "Preparando..." : `Revisar todos (${sectionRecheckUsernames.length.toLocaleString("pt-BR")})`}
+              {bulkRecheckBusy ? "Preparando..." : tab === "possible"
+                ? possibleBatchCursor >= sectionRecheckUsernames.length
+                  ? "Lotes enviados"
+                  : `Revisar próximo lote (${Math.min(50, sectionRecheckUsernames.length - possibleBatchCursor)})`
+                : `Revisar todos (${sectionRecheckUsernames.length.toLocaleString("pt-BR")})`}
             </button>
-            {!androidReady && !extensionReady ? <p className="w-full text-xs text-blue-800">Conecte o APK atualizado ou a extensão atualizada para iniciar a revisão.</p> : null}
+            {tab === "possible" && possibleBatchCursor >= sectionRecheckUsernames.length && sectionRecheckUsernames.length > 0 ? <button type="button" onClick={() => setPossibleBatchCursor(0)} className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-xs font-bold text-blue-800">Recomeçar lotes</button> : null}
+            {!androidReady && !extensionReady ? <p className="w-full text-xs text-blue-800">A lista manual permanece disponível abaixo. Para a leitura automática, conecte o APK ou a extensão atualizada.</p> : null}
+            {batchResumeAvailable && !batchRunning && tab === "possible" ? <p className="w-full text-xs font-semibold text-amber-800">Há um lote antigo pausado. Você pode continuar revisando os perfis manualmente ou retomar o lote no scanner. Iniciar um novo lote substituirá a fila antiga, preservando as contagens salvas.</p> : null}
           </div>
           <div className="mt-4 border-t border-slate-100 pt-4">
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-1">
