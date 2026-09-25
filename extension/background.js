@@ -386,7 +386,7 @@ async function processNext() {
 
 async function handleTimeout() {
   const state = await getState();
-  if (!state.batch.running || !state.batch.currentUsername) return;
+  if (!state.account || !state.batch.running || !state.batch.currentUsername) return;
 
   const username = normalizeUsername(state.batch.currentUsername);
   await markFailure(username, "timeout");
@@ -591,9 +591,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "FOLLOWCLEAN_BLOCKED") {
-    void stopBatch(
-      "O Instagram exibiu login, verificação ou bloqueio. A verificação foi pausada automaticamente."
-    ).then(() => sendResponse({ ok: true }));
+    void (async () => {
+      const state = await getState();
+      if (!state.account || !state.batch.running ||
+          sender.tab?.id !== state.batch.tabId) {
+        return { ok: false };
+      }
+      await stopBatch(
+        "O Instagram exibiu login, verificação ou bloqueio. A verificação foi pausada automaticamente."
+      );
+      return { ok: true };
+    })().then(sendResponse).catch(() => sendResponse({ ok: false }));
     return true;
   }
 });
