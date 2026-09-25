@@ -138,6 +138,16 @@
     }
   });
 
+  // The popup must revalidate the current first-party session before it
+  // exposes Start/Manual controls; a cached account from yesterday is unsafe.
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== "FOLLOWCLEAN_VERIFY_ACCOUNT") return;
+    void verifyAndBind().then((account) => {
+      sendResponse({ ok: Boolean(account), ownerId: account?.ownerId || null });
+    }).catch(() => sendResponse({ ok: false }));
+    return true;
+  });
+
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || !active) return;
     if (Object.keys(changes).some((name) => name.startsWith("followcleanV2:" + active.ownerId + ":"))) {
