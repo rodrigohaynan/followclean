@@ -423,6 +423,55 @@ async function startBatch(forceRecheckMode = false) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== "object") return;
 
+  if (message.type === "FOLLOWCLEAN_UNBIND") {
+    if (!sender.tab?.url?.startsWith("https://followclean.netlify.app/")) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    void (async () => {
+      const old = await getActiveAccount();
+      if (old) await bindAccount({ ...old });
+      await clearAlarms();
+      if (old) {
+        const record = await getScoped(["followcleanBatch"], old.ownerId);
+        await setScoped({ followcleanBatch: {
+          ...record.followcleanBatch, running: false, currentUsername: null,
+          tabId: null, lastMessage: "Sessão encerrada. Entre no FollowClean para vincular esta extensão."
+        } }, old.ownerId);
+      }
+      await chrome.storage.local.remove(ACTIVE_ACCOUNT_KEY);
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  if (message.type === "FOLLOWCLEAN_SET_QUEUE") {
+    if (!sender.tab?.url?.startsWith("https://followclean.netlify.app/")) {
+      sendResponse({ ok: false, error: "Origem inválida." });
+      return false;
+    }
+    void (async () => {
+      const state = await getState();
+      if (!state.account || state.account.ownerId !== message.ownerId) {
+        sendResponse({ ok: false, error: "Conta diferente. Atualize o FollowClean." });
+        return;
+      }
+      if (state.batch.running) {
+        sendResponse({ ok: false, error: "Pause o lote antes de substituir a fila." });
+        return;
+      }
+      const queue = [...new Set((Array.isArray(message.usernames) ? message.usernames : [])
+        .map(normalizeUsername).filter((v) => /^[a-z0-9._]{1,30}$/.test(v) && !v.startsWith("__deleted__")))];
+      await setScoped({
+        followcleanQueue: queue,
+        followcleanForcedRechecks: message.forceRecheck ? queue : [],
+        followcleanQueueUpdatedAt: new Date().toISOString()
+      }, state.account.ownerId);
+      sendResponse({ ok: true, total: queue.length });
+    })().catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
   if (message.type === "FOLLOWCLEAN_BIND_ACCOUNT") {
     const allowed = sender.tab?.url?.startsWith("https://followclean.netlify.app/");
     if (!allowed) {
@@ -446,7 +495,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "FOLLOWCLEAN_START_BATCH") {
-    void startBatch(Boolean(message.forceRecheck)).then(sendResponse);
+    void (async () => {
+      const state = await getState();
+      if (message.ownerId && message.ownerId !== state.account?.ownerId) {
+        return { ok: false, error: "Conta alterada. Atualize o FollowClean." };
+      }
+      return startBatch(Boolean(message.forceRecheck));
+    })().then(sendResponse);
     return true;
   }
 
