@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/verify-reciprocity.mjs",
+    "prebuild": "node scripts/verify-reciprocity.mjs && node scripts/verify-account-ownership.mjs",
     "build": "next build",
     "start": "next start"
   },
