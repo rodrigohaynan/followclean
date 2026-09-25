@@ -664,16 +664,42 @@ class MainActivity : Activity() {
                 val original = Regex("^instagram-([a-z0-9._]+)-\\d{4}-\\d{2}-\\d{2}(?:-|\\.|$)", RegexOption.IGNORE_CASE)
                     .find(file)?.groupValues?.getOrNull(1)?.lowercase()
                 if (original == username.lowercase()) {
-                    // Keep original preferences untouched; only copy an explicitly
-                    // attributable legacy snapshot and its native cache.
+                    // Preserve the old archive. Legacy native caches may already
+                    // contain results gathered after a second login, so migrate
+                    // only usernames that existed in this account's export.
+                    val following = snapshot?.optJSONObject("latest")
+                        ?.optJSONObject("analysis")?.optJSONArray("following") ?: JSONArray()
+                    val eligible = jsonArrayToUsernames(following).toSet()
                     val editor = destination.edit()
                     for ((key, value) in legacyPrefs.all) {
-                        when (value) {
-                            is String -> editor.putString(key, value)
-                            is Boolean -> editor.putBoolean(key, value)
-                            is Int -> editor.putInt(key, value)
-                            is Long -> editor.putLong(key, value)
-                            is Float -> editor.putFloat(key, value)
+                        if (key == "results" || key == "failures") {
+                            val source = runCatching { JSONObject(value as? String ?: "") }
+                                .getOrDefault(JSONObject())
+                            val filtered = JSONObject()
+                            for (entry in eligible) {
+                                if (source.has(entry)) filtered.put(entry, source.get(entry))
+                            }
+                            editor.putString(key, filtered.toString())
+                        } else if (key == "queue" || key == "forceRecheckUsernames") {
+                            val oldQueue = runCatching { JSONArray(value as? String ?: "") }
+                                .getOrDefault(JSONArray())
+                            editor.putString(key, JSONArray(
+                                jsonArrayToUsernames(oldQueue).filter { eligible.contains(it) }
+                            ).toString())
+                        } else if (key == "currentIndex" || key == "processedThisRun" ||
+                            key == "running" || key == "currentUsername" ||
+                            key == "oauth_pending") {
+                            // Old queue cursors, pending OAuth and a running state
+                            // cannot safely be resumed under a new account binding.
+                            continue
+                        } else {
+                            when (value) {
+                                is String -> editor.putString(key, value)
+                                is Boolean -> editor.putBoolean(key, value)
+                                is Int -> editor.putInt(key, value)
+                                is Long -> editor.putLong(key, value)
+                                is Float -> editor.putFloat(key, value)
+                            }
                         }
                     }
                     editor.putString("legacy_migrated_from", username.lowercase()).apply()
