@@ -26,7 +26,10 @@ import {
   encodeFollowCleanBackup,
   salvageFollowCleanBackup,
 } from "@/lib/storage/backup";
+import { useAccountStorage, fetchActiveAccount } from "@/lib/storage/account-client";
 import {
+  exportBelongsToAccount,
+  exportNamesAnotherAccount,
   getAnalyses,
   getCleanupSettings,
   getProfileMetadata,
@@ -109,6 +112,7 @@ function unavailableReasonLabel(reason: string) {
 }
 
 export function CleanupManager() {
+  const { account, error: accountError, migration } = useAccountStorage();
   const [latest, setLatest] = useState<StoredAnalysis | null>(null);
   const [protectedProfiles, setProtectedProfiles] = useState<ProtectedProfile[]>([]);
   const [profileMetadata, setProfileMetadata] = useState<ProfileMetadata[]>([]);
@@ -151,6 +155,16 @@ export function CleanupManager() {
   const [restoreBackupStatus, setRestoreBackupStatus] = useState("");
 
   async function applyCloudState(state: Record<string, unknown>) {
+    if (!account || (state?.account as { ownerId?: string } | null)?.ownerId !== account.id) {
+      setCloudNote("Dados de outra conta recusados: reconecte o Instagram.");
+      return;
+    }
+    const incomingSnapshot = state?.snapshot as { source_file?: string } | null;
+    if (incomingSnapshot?.source_file &&
+        !exportBelongsToAccount(incomingSnapshot.source_file, account.username)) {
+      setCloudNote("Checkpoint antigo sem propriedade confiável isolado. Nenhum dado foi importado.");
+      return;
+    }
     const summary = state?.summary as Record<string, unknown> | undefined;
     if (summary) {
       setCloudSummary({
@@ -318,6 +332,7 @@ export function CleanupManager() {
   }
 
   useEffect(() => {
+    if (!account) return;
     Promise.all([getAnalyses(), getProtectedProfiles(), getCleanupSettings(), getProfileMetadata()])
       .then(([history, protectedList, storedSettings, metadata]) => {
         setLatest(history[0] ?? null);
@@ -326,7 +341,7 @@ export function CleanupManager() {
         setProfileMetadata(metadata);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [account]);
 
   // Persist cloud/native merged confirmations without requiring a new import.
   useEffect(() => {
@@ -347,6 +362,7 @@ export function CleanupManager() {
     }
 
     function handleMessage(event: MessageEvent) {
+      if (!account) return;
       if (event.source !== window) return;
 
       const data = event.data as {
@@ -389,6 +405,7 @@ export function CleanupManager() {
           resumeAvailable?: unknown;
         } | null;
         snapshot?: unknown;
+        ownerId?: unknown;
         version?: unknown;
         usernames?: unknown;
         value?: unknown;
@@ -403,9 +420,26 @@ export function CleanupManager() {
       const fromExtension = data?.source === "followclean-extension";
       const fromAndroid = data?.source === "followclean-android";
       if (!fromExtension && !fromAndroid) return;
+      // Old unscoped extension caches are never allowed into an account.
+      if (fromExtension) return;
+      if (fromAndroid && data.type !== "READY" && data.type !== "ACCOUNT_READY" &&
+          data.ownerId !== account.id) return;
 
+      if (data.type === "ACCOUNT_READY" && fromAndroid) {
+        setAndroidReady(true);
+        setAndroidVersion(typeof data.version === "string" ? data.version : "");
+        setExtensionNote("Scanner isolado para @" + account.username);
+        return;
+      }
       if (data.type === "READY") {
         if (fromAndroid) {
+          if (data.ownerId !== account.id) {
+            const bridge = (window as Window & {
+              FollowCleanAndroid?: { postMessage: (message: string) => void };
+            }).FollowCleanAndroid;
+            bridge?.postMessage(JSON.stringify({ type: "SET_ACCOUNT", ownerId: account.id, username: account.username }));
+            return;
+          }
           setAndroidReady(true);
           setAndroidVersion(typeof data.version === "string" ? data.version : "");
           setExtensionNote("Aplicativo Android detectado e pronto.");
@@ -976,23 +1010,21 @@ export function CleanupManager() {
     }
 
     window.addEventListener("message", handleMessage);
-    window.postMessage({ source: "followclean-web", type: "PING" }, "*");
+    // The native scanner is bound to the authenticated account before any
+    // snapshot or old result is requested. Legacy extension caches are ignored.
 
     const bridge = (window as Window & {
       FollowCleanAndroid?: { postMessage: (message: string) => void };
     }).FollowCleanAndroid;
     if (bridge?.postMessage) {
-      setAndroidReady(true);
-      setExtensionNote("Aplicativo Android detectado e pronto.");
-      bridge.postMessage(JSON.stringify({ type: "PING" }));
-      bridge.postMessage(JSON.stringify({ type: "GET_RESULTS" }));
-      bridge.postMessage(JSON.stringify({ type: "GET_SNAPSHOT" }));
+      bridge.postMessage(JSON.stringify({ type: "SET_ACCOUNT", ownerId: account.id, username: account.username }));
     }
 
     return () => window.removeEventListener("message", handleMessage);
-  }, [cloudConfigured]);
+  }, [cloudConfigured, account]);
 
   useEffect(() => {
+    if (!account) return;
     let cancelled = false;
 
     async function setupCloudSync() {
@@ -1018,6 +1050,10 @@ export function CleanupManager() {
             : null;
 
         if (cancelled) return;
+        if (String(tokenData?.account?.id) !== account.id) {
+          setCloudNote("Sessão mudou de conta; recarregue a página.");
+          return;
+        }
 
         setCloudConfigured(configured);
         setCloudToken(token);
@@ -1068,10 +1104,11 @@ export function CleanupManager() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [account]);
 
   useEffect(() => {
-    if (!cloudConfigured || !cloudHydrated || loading || !latest) return;
+    if (!account || !cloudConfigured || !cloudHydrated || loading || !latest ||
+        !exportBelongsToAccount(latest.sourceFile, account.username)) return;
 
     const timer = window.setTimeout(() => {
       void (async () => {
@@ -1096,7 +1133,8 @@ export function CleanupManager() {
   ]);
 
   useEffect(() => {
-    if (!androidReady || !latest) return;
+    if (!account || !androidReady || !latest ||
+        !exportBelongsToAccount(latest.sourceFile, account.username)) return;
 
     const timer = window.setTimeout(() => {
       saveProgressToAppMemory();
@@ -1281,7 +1319,8 @@ export function CleanupManager() {
   }
 
   function saveProgressToAppMemory() {
-    if (!androidReady || !latest || !androidBridge()?.postMessage) {
+    if (!account || !androidReady || !latest || !androidBridge()?.postMessage ||
+        !exportBelongsToAccount(latest.sourceFile, account.username)) {
       return false;
     }
 
@@ -1289,6 +1328,7 @@ export function CleanupManager() {
       JSON.stringify({
         type: "SAVE_SNAPSHOT",
         snapshot: {
+          ownerId: account.id,
           latest,
           protectedProfiles,
           settings,
@@ -1307,6 +1347,8 @@ export function CleanupManager() {
     }
 
     const backup = encodeFollowCleanBackup({
+      ownerId: account?.id,
+      accountUsername: account?.username,
       latest,
       protectedProfiles,
       settings,
@@ -1364,6 +1406,8 @@ export function CleanupManager() {
     }
 
     const backup = encodeFollowCleanBackup({
+      ownerId: account?.id,
+      accountUsername: account?.username,
       latest,
       protectedProfiles,
       settings,
@@ -1424,6 +1468,10 @@ export function CleanupManager() {
         salvaged = true;
       }
 
+      if (!account || backup.ownerId !== account.id ||
+          backup.accountUsername !== account.username) {
+        throw new Error("Backup sem identificação ou pertencente a outra conta. A restauração foi bloqueada.");
+      }
       let restoredLatest: StoredAnalysis | null = null;
       let restoredProtected: ProtectedProfile[] = [];
       let restoredSettings = settings;
@@ -1620,21 +1668,27 @@ export function CleanupManager() {
   }
 
   async function uploadLocalProgressToCloud() {
+    if (!account || !latest ||
+        !exportBelongsToAccount(latest.sourceFile, account.username)) {
+      setCloudNote("Envio bloqueado: os dados não pertencem à conta autenticada.");
+      return false;
+    }
+    const current = await fetchActiveAccount().catch(() => null);
+    if (!current || current.id !== account.id) {
+      setCloudNote("Conta alterada: envio suspenso para proteger os dados.");
+      return false;
+    }
     if (!cloudConfigured) {
       setCloudNote("A nuvem ainda não está disponível nesta sessão.");
       return false;
     }
-    if (!latest) {
-      setCloudNote("Não há análise local neste dispositivo para enviar.");
-      return false;
-    }
-
     try {
       setCloudNote("Enviando o progresso deste dispositivo para a nuvem...");
       const response = await fetch("/api/cleanup/cloud/snapshot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ownerId: account.id,
           analysis: latest.analysis,
           sourceFile: latest.sourceFile,
           analysisCreatedAt: latest.createdAt,
@@ -2071,7 +2125,8 @@ export function CleanupManager() {
     </div>
   ) : null;
 
-  if (loading) return <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">Carregando regras locais...</div>;
+  if (accountError) return <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-950">{accountError} <Link className="font-bold underline" href="/conectar">Conectar Instagram</Link></div>;
+  if (!account || loading) return <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">Verificando conta e histórico local...</div>;
   if (!latest) return <><div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2><p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">O botão Restaurar backup abre um campo grande para você colar manualmente o código completo.</p></div>{restoreBackupDialog}</>;
 
   // Native batch counters belong to the ACTIVE scan, not to the number of
