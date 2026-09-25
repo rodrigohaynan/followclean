@@ -1,31 +1,26 @@
 async function loadState() {
-  const stored = await chrome.storage.local.get([
-    "followcleanQueue",
-    "followcleanResults",
-    "followcleanBatch",
-    "followcleanFailures",
-    "followcleanCloudAuth"
-  ]);
-
-  const queue = Array.isArray(stored.followcleanQueue)
-    ? stored.followcleanQueue
-    : [];
-  const results = stored.followcleanResults || {};
-  const failures = stored.followcleanFailures || {};
-  const cloudConfigured = Boolean(
-    stored.followcleanCloudAuth?.configured &&
-    stored.followcleanCloudAuth?.token
-  );
+  const stored = await chrome.runtime.sendMessage({ type: "FOLLOWCLEAN_GET_STATE" });
+  const account = stored?.account || null;
+  const queue = account && Array.isArray(stored.queue) ? stored.queue : [];
+  const results = account ? stored.results || {} : {};
+  const failures = account ? stored.failures || {} : {};
+  const cloudConfigured = Boolean(account && stored.cloudConfigured);
+  document.getElementById("accountName").textContent =
+    account ? "Conta vinculada: @" + account.username :
+      "Nenhuma conta vinculada. Abra o FollowClean com a conta desejada.";
   const pending = queue.filter((username) => {
     const result = results[username];
     const validResult = result && Number(result.parserVersion || 0) >= 2;
     return !validResult && !failures[username];
   });
-  const batch = stored.followcleanBatch || {
+  const batch = account ? stored.batch || {
     running: false,
     processedThisRun: 0,
     currentUsername: null,
     lastMessage: "Parado"
+  } : {
+    running: false, processedThisRun: 0, currentUsername: null,
+    lastMessage: "Entre no FollowClean com a conta desejada; a fila antiga está preservada separadamente."
   };
 
   document.getElementById("queueTotal").textContent = queue.length;
@@ -47,14 +42,15 @@ async function loadState() {
   batchMessage.textContent = batch.lastMessage || "Parado";
   batchProgress.style.width = batch.running ? "100%" : "0%";
   startBatch.disabled =
-    batch.running || (!cloudConfigured && pending.length === 0);
+    !account || batch.running || (!cloudConfigured && pending.length === 0);
   pauseBatch.disabled = !batch.running;
 
   const cloudStatus = document.getElementById("cloudStatus");
   if (cloudStatus) {
     cloudStatus.textContent = cloudConfigured
-      ? "Checkpoint em nuvem ativo"
-      : "Somente neste navegador";
+      ? "Checkpoint em nuvem ativo para @" + account.username
+      : account ? "Somente @" + account.username + " neste navegador" :
+        "Vincule sua conta no site antes de iniciar a verificação";
   }
 
   const next = pending[0];
@@ -63,12 +59,14 @@ async function loadState() {
   const button = document.getElementById("openNext");
 
   if (!next) {
-    usernameEl.textContent = cloudConfigured
+    usernameEl.textContent = !account ? "Conta não vinculada" : cloudConfigured
       ? "Fila em nuvem"
       : queue.length
         ? "Fila concluída"
         : "Fila vazia";
-    hintEl.textContent = cloudConfigured
+    hintEl.textContent = !account
+      ? "Abra o FollowClean e conecte a conta correta. Dados antigos não serão carregados automaticamente."
+      : cloudConfigured
       ? "Ao iniciar, a extensão buscará o próximo perfil pendente salvo na nuvem."
       : queue.length
         ? "Volte ao FollowClean e sincronize os resultados."
