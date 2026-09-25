@@ -1023,7 +1023,7 @@ export function CleanupManager() {
     const bridge = (window as Window & {
       FollowCleanAndroid?: { postMessage: (message: string) => void };
     }).FollowCleanAndroid;
-    if (bridge?.postMessage) {
+    if (bridge?.postMessage && account) {
       bridge.postMessage(JSON.stringify({ type: "SET_ACCOUNT", ownerId: account.id, username: account.username }));
     }
 
@@ -1032,6 +1032,7 @@ export function CleanupManager() {
 
   useEffect(() => {
     if (!account) return;
+    const verifiedAccount = account;
     let cancelled = false;
 
     async function setupCloudSync() {
@@ -1057,7 +1058,7 @@ export function CleanupManager() {
             : null;
 
         if (cancelled) return;
-        if (String(tokenData?.account?.id) !== account.id) {
+        if (String(tokenData?.account?.id) !== verifiedAccount.id) {
           setCloudNote("Sessão mudou de conta; recarregue a página.");
           return;
         }
