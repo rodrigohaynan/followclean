@@ -14,9 +14,11 @@ import {
 } from "lucide-react";
 import { analyzeInstagramExport } from "@/lib/instagram/parser";
 import type { InstagramAnalysis } from "@/lib/instagram/types";
-import { saveAnalysis } from "@/lib/storage/indexeddb";
+import { exportBelongsToAccount, saveAnalysis } from "@/lib/storage/indexeddb";
+import { useAccountStorage } from "@/lib/storage/account-client";
 
 export function ImportAnalyzer() {
+  const { account, error: accountError } = useAccountStorage();
   const [analysis, setAnalysis] = useState<InstagramAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -32,7 +34,11 @@ export function ImportAnalyzer() {
   }, [analysis, query]);
 
   async function handleFile(file: File | undefined) {
-    if (!file) return;
+    if (!file || !account) return;
+    if (!exportBelongsToAccount(file.name, account.username)) {
+      setError(`O arquivo ${file.name} não identifica a conta @${account.username}. Selecione a exportação desta conta, com seu nome no arquivo original.`);
+      return;
+    }
     setError(null);
     setAnalysis(null);
     setSaved(false);
@@ -55,8 +61,11 @@ export function ImportAnalyzer() {
     }
   }
 
+  if (accountError) return <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-900">{accountError} <Link href="/conectar" className="font-bold underline">Conectar Instagram</Link></div>;
+  if (!account) return <div className="rounded-2xl border border-slate-200 p-5">Verificando a conta conectada...</div>;
   return (
     <div className="space-y-3 sm:space-y-6">
+      <p className="text-sm font-bold text-blue-800">Importação exclusiva de @{account.username}</p>
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6 md:p-8">
         <div className="flex flex-col gap-4 sm:gap-6 md:flex-row md:items-center md:justify-between">
           <div className="max-w-xl">
