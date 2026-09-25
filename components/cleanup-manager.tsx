@@ -414,6 +414,7 @@ export function CleanupManager() {
         } | null;
         snapshot?: unknown;
         ownerId?: unknown;
+        accountUsername?: unknown;
         version?: unknown;
         usernames?: unknown;
         value?: unknown;
@@ -428,8 +429,9 @@ export function CleanupManager() {
       const fromExtension = data?.source === "followclean-extension";
       const fromAndroid = data?.source === "followclean-android";
       if (!fromExtension && !fromAndroid) return;
-      // Old unscoped extension caches are never allowed into an account.
-      if (fromExtension) return;
+      // Version 0.4.3 binds each extension message to the authenticated account.
+      // Reject older unscoped extension messages (they carry no ownerId).
+      if (fromExtension && data.ownerId !== account.id) return;
       if (fromAndroid && data.type !== "READY" && data.type !== "ACCOUNT_READY" &&
           data.ownerId !== account.id) return;
 
@@ -467,10 +469,11 @@ export function CleanupManager() {
             setLastCloudSyncAt(data.lastCloudSyncAt);
           }
         } else {
+          if (data.accountUsername !== account.username) return;
           setExtensionReady(true);
-          setExtensionNote("Extensão detectada e pronta.");
+          setExtensionNote("Extensão vinculada a @" + account.username + ".");
           window.postMessage(
-            { source: "followclean-web", type: "GET_RESULTS" },
+            { source: "followclean-web", type: "GET_RESULTS", ownerId: account.id },
             "*",
           );
         }
@@ -923,9 +926,17 @@ export function CleanupManager() {
       }
 
       if (data.type === "RESULTS") {
+        // A previous account can remain open in another tab; never import its
+        // results into this account or into an account without an export.
+        if (fromExtension && !latest) return;
+        const eligible = new Set([
+          ...(latest?.analysis.following || []),
+          ...protectedProfiles.map((entry) => entry.username)
+        ].map((value) => value.toLowerCase()));
         if (Array.isArray(data.failures)) {
           const failures: UnavailableProfile[] = data.failures.flatMap((item) => {
-            if (typeof item?.username !== "string") return [];
+            if (typeof item?.username !== "string" ||
+                (fromExtension && !eligible.has(item.username.toLowerCase()))) return [];
             return [{
               username: item.username.trim().toLowerCase().replace(/^@/, ""),
               reason: typeof item.reason === "string" ? item.reason : "unavailable",
@@ -968,7 +979,8 @@ export function CleanupManager() {
         const records: ProfileMetadata[] = data.results.flatMap((item) => {
           if (
             typeof item?.username !== "string" ||
-            typeof item?.followersCount !== "number"
+            typeof item?.followersCount !== "number" ||
+            (fromExtension && !eligible.has(item.username.toLowerCase()))
           ) {
             return [];
           }
@@ -1025,8 +1037,9 @@ export function CleanupManager() {
     }
 
     window.addEventListener("message", handleMessage);
-    // The native scanner is bound to the authenticated account before any
-    // snapshot or old result is requested. Legacy extension caches are ignored.
+    // Both scanner and extension must prove their active Instagram account
+    // before sending any results from their previously cached queues.
+    window.postMessage({ source: "followclean-web", type: "PING", ownerId: account.id }, "*");
 
     const bridge = (window as Window & {
       FollowCleanAndroid?: { postMessage: (message: string) => void };
@@ -1036,7 +1049,7 @@ export function CleanupManager() {
     }
 
     return () => window.removeEventListener("message", handleMessage);
-  }, [cloudConfigured, account]);
+  }, [cloudConfigured, account, latest]);
 
   useEffect(() => {
     if (!account) return;
@@ -1925,7 +1938,7 @@ export function CleanupManager() {
       return;
     }
 
-    if (!androidReady && cloudConfigured) {
+    if (!androidReady && cloudConfigured && !extensionReady) {
       try {
         const response = await fetch("/api/cleanup/cloud/queue", {
           method: "POST",
@@ -1984,9 +1997,11 @@ export function CleanupManager() {
       );
     }
     setExtensionNote(
-      cloudConfigured
-        ? "Iniciando verificação contínua com checkpoint em nuvem..."
-        : "Iniciando verificação contínua neste navegador...",
+      extensionReady
+        ? "Iniciando verificação na fila isolada desta conta no Chrome..."
+        : cloudConfigured
+          ? "Iniciando verificação contínua com checkpoint em nuvem..."
+          : "Iniciando verificação contínua neste navegador...",
     );
   }
 
