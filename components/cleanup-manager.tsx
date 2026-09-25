@@ -728,7 +728,7 @@ export function CleanupManager() {
 
           if (data.batch) {
             if (typeof data.batch.resumeAvailable === "boolean") setBatchResumeAvailable(data.batch.resumeAvailable);
-            if (typeof data.batch.queueTotal === "number") setBatchQueueTotal(data.batch.queueTotal);
+          if (typeof data.batch.queueTotal === "number") setBatchQueueTotal(data.batch.queueTotal);
             setBatchRunning(Boolean(data.batch.running));
             setBatchCurrent(
               typeof data.batch.currentUsername === "string"
@@ -909,6 +909,7 @@ export function CleanupManager() {
               : 0,
           );
           if (typeof data.batch.lastMessage === "string") {
+            setBatchLastMessage(data.batch.lastMessage);
             setExtensionNote(data.batch.lastMessage);
           }
         }
