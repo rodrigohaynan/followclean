@@ -426,6 +426,7 @@ export function CleanupManager() {
           data.ownerId !== account.id) return;
 
       if (data.type === "ACCOUNT_READY" && fromAndroid) {
+        if (data.ownerId !== account.id) return;
         setAndroidReady(true);
         setAndroidVersion(typeof data.version === "string" ? data.version : "");
         setExtensionNote("Scanner isolado para @" + account.username);
@@ -539,6 +540,12 @@ export function CleanupManager() {
 
         if (data.snapshot && typeof data.snapshot === "object") {
           const snapshot = data.snapshot as Record<string, unknown>;
+          const source = (snapshot.latest as StoredAnalysis | undefined)?.sourceFile;
+          if (!source || !exportBelongsToAccount(source, account.username) ||
+              (snapshot.ownerId && snapshot.ownerId !== account.id)) {
+            setExtensionNote("Snapshot antigo de outra conta isolado; seus dados foram preservados.");
+            return;
+          }
 
           if (snapshot.latest && typeof snapshot.latest === "object") {
             const record = snapshot.latest as StoredAnalysis;
@@ -1468,9 +1475,12 @@ export function CleanupManager() {
         salvaged = true;
       }
 
-      if (!account || backup.ownerId !== account.id ||
-          backup.accountUsername !== account.username) {
-        throw new Error("Backup sem identificação ou pertencente a outra conta. A restauração foi bloqueada.");
+      const backupSource = (backup.latest as StoredAnalysis | undefined)?.sourceFile;
+      if (!account || !backupSource ||
+          !exportBelongsToAccount(backupSource, account.username) ||
+          (backup.ownerId && backup.ownerId !== account.id) ||
+          (backup.accountUsername && backup.accountUsername !== account.username)) {
+        throw new Error("O backup não identifica com segurança esta conta do Instagram. A restauração foi bloqueada.");
       }
       let restoredLatest: StoredAnalysis | null = null;
       let restoredProtected: ProtectedProfile[] = [];
