@@ -122,6 +122,14 @@ export async function POST(request: NextRequest) {
       ? body.sourceFile.slice(0, 500)
       : null;
 
+  // The old client could upload a different user's local snapshot after
+  // changing the Instagram login. Reject it on the server, not just in the UI.
+  const matched = sourceFile?.match(/^instagram-([a-z0-9._]+)-\d{4}-\d{2}-\d{2}(?:-|\.|$)/i);
+  if (body?.ownerId !== identity.ownerId ||
+      !matched || matched[1].toLowerCase() !== identity.username) {
+    return NextResponse.json({ error: "account_mismatch" }, { status: 409 });
+  }
+
   const analysisCreatedAt = parseDate(body?.analysisCreatedAt);
 
   await ensureCloudSchema();
