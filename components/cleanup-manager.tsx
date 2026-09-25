@@ -44,7 +44,7 @@ import {
   type StoredAnalysis,
 } from "@/lib/storage/indexeddb";
 
-type Tab = "priority" | "review" | "above" | "protected" | "unavailable";
+type Tab = "possible" | "priority" | "review" | "above" | "protected" | "unavailable";
 type InitialFilter = "all" | "special" | "0-9" | (typeof ALPHABET)[number];
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("") as readonly string[];
@@ -137,6 +137,8 @@ export function CleanupManager() {
   const [bulkReviewArmed, setBulkReviewArmed] = useState(false);
   const [bulkReviewBusy, setBulkReviewBusy] = useState(false);
   const [bulkRecheckBusy, setBulkRecheckBusy] = useState(false);
+  const [possiblePageSize, setPossiblePageSize] = useState(100);
+  const [possibleBatchCursor, setPossibleBatchCursor] = useState(0);
   const [networkPauseNote, setNetworkPauseNote] = useState("");
   const [extensionFailures, setExtensionFailures] = useState<UnavailableProfile[]>([]);
   const [cloudConfigured, setCloudConfigured] = useState(false);
@@ -1210,6 +1212,33 @@ export function CleanupManager() {
     () => new Set(unavailable.map((item) => item.username)),
     [unavailable],
   );
+  // Keep the raw export candidates visible even when all category counters
+  // are zero or when an earlier offline scan marked them as unavailable.
+  // This is a review list, NOT a claim that these accounts do not follow back.
+  const possibleUsernames = useMemo(() => {
+    if (!latest) return [];
+    return Array.from(new Set(latest.analysis.notFollowingBack
+      .map((username) => username.trim().toLowerCase().replace(/^@/, ""))
+      .filter((username) =>
+        /^[a-z0-9._]{1,30}$/.test(username) &&
+        !username.startsWith("__deleted__"))
+    )).sort((a, b) => a.localeCompare(b));
+  }, [latest]);
+  const possibleEligible = useMemo(
+    () => possibleUsernames.filter((username) =>
+      !protectedSet.has(username) &&
+      settings.reciprocityChecks?.[username]?.result !== "follows"
+    ),
+    [possibleUsernames, protectedSet, settings.reciprocityChecks],
+  );
+  const possibleByName = useMemo(
+    () => new Map(queue.map((item) => [item.username.toLowerCase(), item] as const)),
+    [queue],
+  );
+  const countByName = useMemo(
+    () => new Map(profileMetadata.map((item) => [item.username.toLowerCase(), item] as const)),
+    [profileMetadata],
+  );
   const priority = useMemo(
     () => queue.filter((item) => item.classification === "priority" && !unavailableSet.has(item.username.toLowerCase())),
     [queue, unavailableSet],
@@ -1239,6 +1268,21 @@ export function CleanupManager() {
     initialFilter === "all"
       ? newestFirst(items, (item) => verificationDates.get(item.username.toLowerCase()))
       : items;
+
+  const filteredPossible = useMemo(() => {
+    const items = possibleUsernames.filter((username) =>
+      matchesInitial(username, initialFilter) &&
+      (!normalizedQuery || username.includes(normalizedQuery))
+    );
+    return initialFilter === "all"
+      ? newestFirst(items.map((username) => ({ username })),
+          (item) => verificationDates.get(item.username)).map((item) => item.username)
+      : items;
+  }, [possibleUsernames, normalizedQuery, initialFilter, verificationDates]);
+
+  useEffect(() => {
+    setPossiblePageSize(100);
+  }, [tab, initialFilter, normalizedQuery, account?.id]);
 
   const filteredPriority = useMemo(
     () => sortAllByVerification(priority.filter((item) =>
@@ -1287,12 +1331,13 @@ export function CleanupManager() {
   );
 
   const initialSource = useMemo(() => {
+    if (tab === "possible") return possibleUsernames;
     if (tab === "priority") return priority.map((item) => item.username);
     if (tab === "review") return review.map((item) => item.username);
     if (tab === "above") return aboveLimit.map((item) => item.username);
     if (tab === "protected") return protectedProfiles.map((item) => item.username);
     return unavailable.map((item) => item.username);
-  }, [tab, priority, review, aboveLimit, protectedProfiles, unavailable]);
+  }, [tab, possibleUsernames, priority, review, aboveLimit, protectedProfiles, unavailable]);
 
   const availableInitials = useMemo(() => {
     const values = new Set<string>();
