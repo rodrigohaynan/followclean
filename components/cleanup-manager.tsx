@@ -126,6 +126,7 @@ export function CleanupManager() {
   const [batchProcessed, setBatchProcessed] = useState(0);
   const [batchQueueTotal, setBatchQueueTotal] = useState(0);
   const [batchLastMessage, setBatchLastMessage] = useState("");
+  const [scannerReviewSection, setScannerReviewSection] = useState("");
   const [lastRead, setLastRead] = useState<{ username: string; followersCount: number } | null>(null);
   const [bulkReviewArmed, setBulkReviewArmed] = useState(false);
   const [bulkReviewBusy, setBulkReviewBusy] = useState(false);
@@ -1803,6 +1804,7 @@ export function CleanupManager() {
     setBatchProcessed(0);
     setBatchCurrent(null);
     setBatchLastMessage("");
+    setScannerReviewSection(labels[tab]);
     setNetworkPauseNote("");
     setExtensionNote(`Iniciando revisão de ${usernames.length.toLocaleString("pt-BR")} perfis em ${labels[tab]}...`);
     try {
@@ -1884,6 +1886,7 @@ export function CleanupManager() {
     setBatchProcessed(0);
     setBatchCurrent(null);
     setBatchLastMessage("");
+    setScannerReviewSection("");
     if (androidReady && androidBridge()?.postMessage) {
       androidBridge()?.postMessage(
         JSON.stringify({ type: "START_BATCH", usernames }),
@@ -2062,32 +2065,35 @@ export function CleanupManager() {
   if (loading) return <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">Carregando regras locais...</div>;
   if (!latest) return <><div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2><p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">O botão Restaurar backup abre um campo grande para você colar manualmente o código completo.</p></div>{restoreBackupDialog}</>;
 
-  // Scanner has reserved space for each changing field, so its height is stable.
-  // A previously finished scanner session is NOT the remaining work queue.
-  // A stale native queueTotal must never suggest that a disabled button can restart it.
+  // Native batch counters belong to the ACTIVE scan, not to the number of
+  // unknown counts in "Revisar". A forced scan of Indisponíveis/Prioridade
+  // can be running while pendingCountChecks is zero.
   const hasPendingCountChecks = pendingCountChecks.length > 0;
-  const scannerTotal = hasPendingCountChecks
-    ? (batchRunning && batchQueueTotal > 0 ? batchQueueTotal : pendingCountChecks.length)
+  const scannerPaused = /pausad|sem acesso|falha de rede|respondeu http|login\/verifica|checkpoint/i.test(batchLastMessage);
+  const scannerDone = /fila concluída/i.test(batchLastMessage);
+  const scannerHasSession = batchQueueTotal > 0 && (batchRunning || scannerPaused || scannerDone);
+  const scannerTotal = scannerHasSession
+    ? Math.max(batchQueueTotal, batchProcessed)
+    : hasPendingCountChecks ? pendingCountChecks.length : 0;
+  const scannerProcessed = scannerHasSession
+    ? Math.min(Math.max(0, batchProcessed), scannerTotal)
     : 0;
-  const scannerProcessed = batchRunning ? Math.min(Math.max(0, batchProcessed), scannerTotal) : 0;
   const scannerPercent = scannerTotal > 0
     ? Math.round((scannerProcessed / scannerTotal) * 100)
     : 0;
-  const scannerPaused = /pausad|sem acesso|falha de rede|respondeu http|login\/verifica|checkpoint/i.test(batchLastMessage);
-  const scannerDone = /fila concluída/i.test(batchLastMessage);
   const scannerStatus = syncBusy
     ? "Sincronizando"
-    : !hasPendingCountChecks && !batchRunning
-      ? "Contagens concluídas"
-      : batchRunning
+    : batchRunning
       ? "Verificando agora"
       : scannerPaused
         ? "Pausado"
         : scannerDone
           ? "Concluído"
-          : androidReady || extensionReady
-            ? "Pronto para iniciar"
-            : "Aguardando conexão";
+          : !hasPendingCountChecks
+            ? "Contagens concluídas"
+            : androidReady || extensionReady
+              ? "Pronto para iniciar"
+              : "Aguardando conexão";
   const scannerStatusTone = batchRunning
     ? "bg-emerald-600 text-white"
     : scannerPaused
@@ -2137,13 +2143,15 @@ export function CleanupManager() {
                 <span className="truncate">{scannerStatus}</span>
               </span>
             </div>
-            <p className="mt-2 h-5 truncate text-xs text-emerald-900/80" title="Leitura automática da contagem de seguidores; reciprocidade verificada separadamente.">
-              Leitura automática: somente contagem de seguidores
+            <p className="mt-2 h-5 truncate text-xs text-emerald-900/80" title={batchRunning && scannerReviewSection ? `Revisando ${scannerReviewSection}: nova leitura dos seguidores.` : "Leitura automática: somente contagem de seguidores."}>
+              {batchRunning && scannerReviewSection
+                ? `Revisando ${scannerReviewSection} · contagem de seguidores`
+                : "Leitura automática: somente contagem de seguidores"}
             </p>
             <div className="mt-4 rounded-xl border border-emerald-200 bg-white/85 p-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-600">{batchRunning ? "Progresso desta sessão" : "Contagens aguardando leitura"}</span>
-                <span className="shrink-0 font-bold tabular-nums text-slate-900">{batchRunning ? scannerProcessed.toLocaleString("pt-BR") + " / " + scannerTotal.toLocaleString("pt-BR") : pendingCountChecks.length.toLocaleString("pt-BR") + " pendentes"}</span>
+                <span className="text-xs font-semibold text-slate-600">{scannerHasSession ? (scannerReviewSection ? `Revisão: ${scannerReviewSection}` : "Progresso desta sessão") : "Contagens aguardando leitura"}</span>
+                <span className="shrink-0 font-bold tabular-nums text-slate-900">{scannerHasSession ? scannerProcessed.toLocaleString("pt-BR") + " / " + scannerTotal.toLocaleString("pt-BR") : pendingCountChecks.length.toLocaleString("pt-BR") + " pendentes"}</span>
               </div>
               <div role="progressbar" aria-label="Progresso da verificação" aria-valuemin={0} aria-valuemax={100} aria-valuenow={scannerPercent} className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
                 <div className="h-full rounded-full bg-emerald-600 transition-[width] duration-300" style={{ width: `${scannerPercent}%` }} />
@@ -2151,8 +2159,8 @@ export function CleanupManager() {
               <div className="mt-3 grid grid-cols-1 gap-2">
                 <div className="min-w-0">
                   <p className="text-[11px] font-semibold text-slate-500">Perfil atual</p>
-                  <p className="h-5 truncate font-semibold text-slate-900" title={batchRunning && batchCurrent ? `@${batchCurrent}` : "Nenhum perfil em leitura"}>
-                    {batchRunning && batchCurrent ? `@${batchCurrent}` : "—"}
+                  <p className="h-5 truncate font-semibold text-slate-900" title={batchRunning && batchCurrent ? `@${batchCurrent}` : batchRunning ? "Aguardando próximo perfil" : "Nenhum perfil em leitura"}>
+                    {batchRunning && batchCurrent ? `@${batchCurrent}` : batchRunning ? "Aguardando próximo perfil…" : "—"}
                   </p>
                 </div>
                 <div className="min-w-0">
@@ -2163,11 +2171,11 @@ export function CleanupManager() {
                 </div>
               </div>
             </div>
-            <p className="mt-3 h-5 min-w-0 truncate text-xs text-emerald-900/80" title={networkPauseNote || extensionNote} aria-label={networkPauseNote ? "Aviso de rede" : "Próxima ação"}>
-              {networkPauseNote || (!hasPendingCountChecks ? "Nenhuma contagem pendente. Confira os perfis da lista Prioridade antes do unfollow." : extensionNote)}
+            <p className="mt-3 h-5 min-w-0 truncate text-xs text-emerald-900/80" title={networkPauseNote || (batchRunning ? batchLastMessage || extensionNote : extensionNote)} aria-label={networkPauseNote ? "Aviso de rede" : "Progresso da verificação"}>
+              {networkPauseNote || (batchRunning ? batchLastMessage || extensionNote : !hasPendingCountChecks ? "Nenhuma contagem pendente. Confira os perfis da lista Prioridade antes do unfollow." : extensionNote)}
             </p>
             <div className="mt-auto grid grid-cols-2 gap-2 pt-4 sm:grid-cols-3">
-              {hasPendingCountChecks ? (
+              {batchRunning || hasPendingCountChecks ? (
                 <button type="button" disabled={(!extensionReady && !androidReady) || batchRunning} onClick={startAutomaticVerification} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg fc-dark-action bg-slate-950 px-2 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40" title="Verificar apenas os perfis cuja quantidade de seguidores ainda é desconhecida">{batchRunning ? "Verificando..." : `Verificar contagens (${pendingCountChecks.length})`}</button>
               ) : (
                 <button type="button" onClick={() => { setTab("priority"); setInitialFilter("all"); setQuery(""); document.getElementById("followclean-profile-lists")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-lg bg-orange-600 px-2 py-2 text-xs font-black text-white" title="As contagens foram lidas. Confira reciprocidade individualmente antes do unfollow.">Ver perfis prioritários</button>
