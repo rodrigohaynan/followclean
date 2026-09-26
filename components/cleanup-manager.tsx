@@ -648,17 +648,21 @@ export function CleanupManager() {
           }
 
           if (snapshotFailures.length) {
-            if (!latest.analysis.notFollowingBack.includes(failure.username)) return;
-
-          setExtensionFailures((current) => {
-              const map = new Map(
-                current.map((item) => [item.username, item] as const),
-              );
-              for (const item of snapshotFailures) {
-                map.set(item.username, item);
-              }
-              return Array.from(map.values());
-            });
+            const allowedSnapshot = new Set(snapshotLatest.analysis.notFollowingBack);
+            const eligibleFailures = snapshotFailures.filter((item) =>
+              allowedSnapshot.has(item.username),
+            );
+            if (eligibleFailures.length) {
+              setExtensionFailures((current) => {
+                const map = new Map(
+                  current.map((item) => [item.username, item] as const),
+                );
+                for (const item of eligibleFailures) {
+                  map.set(item.username, item);
+                }
+                return Array.from(map.values());
+              });
+            }
           }
         }
         return;
@@ -951,6 +955,7 @@ export function CleanupManager() {
 
   useEffect(() => {
     if (!account) return;
+    const activeAccount = account;
     let cancelled = false;
 
     async function setupCloudSync() {
@@ -974,8 +979,8 @@ export function CleanupManager() {
           typeof tokenData?.account?.username === "string"
             ? tokenData.account.username.toLowerCase()
             : null;
-        if (String(tokenData?.account?.id ?? "") !== account.id ||
-            accountUsername !== account.username) {
+        if (String(tokenData?.account?.id ?? "") !== activeAccount.id ||
+            accountUsername !== activeAccount.username) {
           setCloudConfigured(false);
           setCloudHydrated(true);
           setCloudNote("A sessão mudou de conta. Atualize a página para continuar com segurança.");
