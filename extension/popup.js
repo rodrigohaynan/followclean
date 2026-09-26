@@ -1,50 +1,31 @@
-let accountVerified = false;
-let displayedOwnerId = null;
-
-async function verifyCurrentSite() {
-  try {
-    const tabs = await chrome.tabs.query({ url: ["https://followclean.netlify.app/*"] });
-    tabs.sort((a, b) => Number(Boolean(b.active)) - Number(Boolean(a.active)));
-    for (const tab of tabs) {
-      if (!tab.id) continue;
-      try {
-        const response = await chrome.tabs.sendMessage(tab.id, { type: "FOLLOWCLEAN_VERIFY_ACCOUNT" });
-        if (response?.ok && response.ownerId) return response.ownerId;
-      } catch {
-        // Another matching tab may still be loading or may lack the content script.
-      }
-    }
-  } catch {}
-  return null;
-}
-
 async function loadState() {
-  const currentOwnerId = await verifyCurrentSite();
-  const stored = await chrome.runtime.sendMessage({ type: "FOLLOWCLEAN_GET_STATE" });
-  const account = currentOwnerId && stored?.account?.ownerId === currentOwnerId
-    ? stored.account : null;
-  accountVerified = Boolean(account);
-  displayedOwnerId = account?.ownerId || null;
-  const queue = account && Array.isArray(stored.queue) ? stored.queue : [];
-  const results = account ? stored.results || {} : {};
-  const failures = account ? stored.failures || {} : {};
-  const cloudConfigured = Boolean(account && stored.cloudConfigured);
-  document.getElementById("accountName").textContent =
-    account ? "Conta vinculada: @" + account.username :
-      "Abra o FollowClean na conta desejada para validar a fila. Os dados anteriores continuam preservados.";
+  const stored = await chrome.storage.local.get([
+    "followcleanQueue",
+    "followcleanResults",
+    "followcleanBatch",
+    "followcleanFailures",
+    "followcleanCloudAuth"
+  ]);
+
+  const queue = Array.isArray(stored.followcleanQueue)
+    ? stored.followcleanQueue
+    : [];
+  const results = stored.followcleanResults || {};
+  const failures = stored.followcleanFailures || {};
+  const cloudConfigured = Boolean(
+    stored.followcleanCloudAuth?.configured &&
+    stored.followcleanCloudAuth?.token
+  );
   const pending = queue.filter((username) => {
     const result = results[username];
     const validResult = result && Number(result.parserVersion || 0) >= 2;
     return !validResult && !failures[username];
   });
-  const batch = account ? stored.batch || {
+  const batch = stored.followcleanBatch || {
     running: false,
     processedThisRun: 0,
     currentUsername: null,
     lastMessage: "Parado"
-  } : {
-    running: false, processedThisRun: 0, currentUsername: null,
-    lastMessage: "Entre no FollowClean com a conta desejada; a fila antiga está preservada separadamente."
   };
 
   document.getElementById("queueTotal").textContent = queue.length;
@@ -66,15 +47,14 @@ async function loadState() {
   batchMessage.textContent = batch.lastMessage || "Parado";
   batchProgress.style.width = batch.running ? "100%" : "0%";
   startBatch.disabled =
-    !account || batch.running || (!cloudConfigured && pending.length === 0);
+    batch.running || (!cloudConfigured && pending.length === 0);
   pauseBatch.disabled = !batch.running;
 
   const cloudStatus = document.getElementById("cloudStatus");
   if (cloudStatus) {
     cloudStatus.textContent = cloudConfigured
-      ? "Checkpoint em nuvem ativo para @" + account.username
-      : account ? "Somente @" + account.username + " neste navegador" :
-        "Vincule sua conta no site antes de iniciar a verificação";
+      ? "Checkpoint em nuvem ativo"
+      : "Somente neste navegador";
   }
 
   const next = pending[0];
@@ -83,14 +63,12 @@ async function loadState() {
   const button = document.getElementById("openNext");
 
   if (!next) {
-    usernameEl.textContent = !account ? "Conta não vinculada" : cloudConfigured
+    usernameEl.textContent = cloudConfigured
       ? "Fila em nuvem"
       : queue.length
         ? "Fila concluída"
         : "Fila vazia";
-    hintEl.textContent = !account
-      ? "Abra o FollowClean e conecte a conta correta. Dados antigos não serão carregados automaticamente."
-      : cloudConfigured
+    hintEl.textContent = cloudConfigured
       ? "Ao iniciar, a extensão buscará o próximo perfil pendente salvo na nuvem."
       : queue.length
         ? "Volte ao FollowClean e sincronize os resultados."
@@ -123,8 +101,7 @@ async function openInstagramProfile(username) {
 
 document.getElementById("openNext").addEventListener("click", async (event) => {
   const username = event.currentTarget.dataset.username;
-  if (!username || !accountVerified ||
-      (await verifyCurrentSite()) !== displayedOwnerId) return;
+  if (!username) return;
   await openInstagramProfile(username);
   window.close();
 });
@@ -142,11 +119,6 @@ loadState();
 
 
 document.getElementById("startBatch").addEventListener("click", async () => {
-  const owner = await verifyCurrentSite();
-  if (!owner || !accountVerified || owner !== displayedOwnerId) {
-    await loadState();
-    return;
-  }
   const response = await chrome.runtime.sendMessage({
     type: "FOLLOWCLEAN_START_BATCH"
   });

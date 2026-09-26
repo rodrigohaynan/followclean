@@ -20,9 +20,6 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => ({}));
-  if (body?.ownerId !== identity.ownerId) {
-    return NextResponse.json({ error: "account_mismatch" }, { status: 409 });
-  }
   const username =
     typeof body?.username === "string"
       ? body.username.trim().toLowerCase().replace(/^@/, "")

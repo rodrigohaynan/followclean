@@ -212,9 +212,19 @@
     if (signature === lastSavedSignature) return;
     lastSavedSignature = signature;
 
-    // Only the background worker can write to the account-scoped database.
-    // A profile opened under the wrong account or outside this account's queue
-    // must never be persisted in a shared global results map.
+    const stored = await chrome.storage.local.get(["followcleanResults"]);
+    const results = stored.followcleanResults || {};
+    results[username] = {
+      username,
+      followersCount,
+      parserVersion: PARSER_VERSION,
+      dataSource: "extension",
+      updatedAt: new Date().toISOString(),
+      profileUrl: location.href
+    };
+
+    await chrome.storage.local.set({ followcleanResults: results });
+
     try {
       await chrome.runtime.sendMessage({
         type: "FOLLOWCLEAN_PROFILE_CAPTURED",

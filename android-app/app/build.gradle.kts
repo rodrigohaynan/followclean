@@ -25,8 +25,8 @@ android {
         applicationId = "br.com.followclean.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 28
-        versionName = "0.3.22"
+        versionCode = 24
+        versionName = "0.3.18"
     }
 
     buildTypes {

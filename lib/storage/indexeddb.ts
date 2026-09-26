@@ -5,42 +5,8 @@ import {
   type ProfileMetadata,
 } from "@/lib/rules/engine";
 
-// Legacy unscoped database is left untouched as a recovery archive.
-const LEGACY_DB_NAME = "followclean";
+const DB_NAME = "followclean";
 const DB_VERSION = 3;
-let activeOwnerId: string | null = null;
-let activeUsername: string | null = null;
-
-export function setStorageAccount(ownerId: string, username: string) {
-  if (!/^[a-zA-Z0-9_-]{1,100}$/.test(ownerId) ||
-      !/^[a-zA-Z0-9._]{1,30}$/.test(username)) {
-    throw new Error("Identidade do Instagram inválida; nenhuma leitura local foi permitida.");
-  }
-  activeOwnerId = ownerId;
-  activeUsername = username.toLowerCase();
-}
-
-export function currentStorageOwner() {
-  return activeOwnerId;
-}
-
-function scopedDatabaseName() {
-  if (!activeOwnerId) throw new Error("Conecte uma conta do Instagram antes de acessar os dados.");
-  return `followclean-account-${activeOwnerId}`;
-}
-
-export function exportBelongsToAccount(sourceFile: string, username: string) {
-  const normalized = username.toLowerCase();
-  // Only recognize explicit Instagram export names, never infer ownership from
-  // follower overlap (people may follow the same profiles on both accounts).
-  const match = /^instagram-([a-z0-9._]+)-\d{4}-\d{2}-\d{2}(?:-|\.|$)/i.exec(sourceFile);
-  return Boolean(match && match[1].toLowerCase() === normalized);
-}
-
-export function exportNamesAnotherAccount(sourceFile: string, username: string) {
-  const match = /^instagram-([a-z0-9._]+)-\d{4}-\d{2}-\d{2}(?:-|\.|$)/i.exec(sourceFile);
-  return Boolean(match && match[1].toLowerCase() !== username.toLowerCase());
-}
 const ANALYSES_STORE = "analyses";
 const PROTECTED_STORE = "protected_profiles";
 const SETTINGS_STORE = "settings";
@@ -63,9 +29,9 @@ type StoredCleanupSettings = CleanupSettings & {
   id: "cleanup";
 };
 
-function openDatabaseByName(dbName: string): Promise<IDBDatabase> {
+function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(dbName, DB_VERSION);
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -97,75 +63,12 @@ function openDatabaseByName(dbName: string): Promise<IDBDatabase> {
   });
 }
 
-function openDatabase() {
-  return openDatabaseByName(scopedDatabaseName());
-}
-
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () =>
       reject(request.error ?? new Error("Falha no armazenamento local."));
   });
-}
-
-// Migrate only when ALL legacy exports explicitly name the currently
-// connected account. Never guess, delete, or mix legacy data across accounts.
-export async function migrateLegacyForAccount() {
-  if (!activeOwnerId || !activeUsername) throw new Error("Conta não conectada.");
-  const scoped = await openDatabase();
-  try {
-    const destination = scoped.transaction(ANALYSES_STORE, "readonly");
-    const existing = await requestToPromise(
-      destination.objectStore(ANALYSES_STORE).getAll() as IDBRequest<StoredAnalysis[]>,
-    );
-    if (existing.length) return "existing" as const;
-    const legacy = await openDatabaseByName(LEGACY_DB_NAME);
-    try {
-      const tx = legacy.transaction(
-        [ANALYSES_STORE, PROTECTED_STORE, SETTINGS_STORE, PROFILE_METADATA_STORE],
-        "readonly",
-      );
-      // Submit ALL readonly requests while the transaction is still active.
-      const [analyses, protectedRows, settings, metadata] = await Promise.all([
-        requestToPromise(tx.objectStore(ANALYSES_STORE).getAll() as IDBRequest<StoredAnalysis[]>),
-        requestToPromise(tx.objectStore(PROTECTED_STORE).getAll() as IDBRequest<ProtectedProfile[]>),
-        requestToPromise(tx.objectStore(SETTINGS_STORE).get("cleanup") as IDBRequest<StoredCleanupSettings | undefined>),
-        requestToPromise(tx.objectStore(PROFILE_METADATA_STORE).getAll() as IDBRequest<ProfileMetadata[]>),
-      ]);
-      if (!analyses.length) return "empty" as const;
-      const ownedAnalyses = analyses.filter((record) =>
-        exportBelongsToAccount(record.sourceFile, activeUsername!),
-      );
-      if (!ownedAnalyses.length) return "quarantined" as const;
-      const relevant = new Set(ownedAnalyses.flatMap((record) =>
-        [...record.analysis.followers, ...record.analysis.following].map((value) => value.toLowerCase()),
-      ));
-      const exclusivelyOwned = ownedAnalyses.length === analyses.length;
-      const write = scoped.transaction(
-        [ANALYSES_STORE, PROTECTED_STORE, SETTINGS_STORE, PROFILE_METADATA_STORE],
-        "readwrite",
-      );
-      for (const record of ownedAnalyses) write.objectStore(ANALYSES_STORE).put(record);
-      for (const row of protectedRows) {
-        if (exclusivelyOwned || relevant.has(row.username.toLowerCase())) write.objectStore(PROTECTED_STORE).put(row);
-      }
-      if (settings) write.objectStore(SETTINGS_STORE).put(settings);
-      for (const row of metadata) {
-        if (exclusivelyOwned || relevant.has(row.username.toLowerCase())) write.objectStore(PROFILE_METADATA_STORE).put(row);
-      }
-      await new Promise<void>((resolve, reject) => {
-        write.oncomplete = () => resolve();
-        write.onerror = () => reject(write.error);
-        write.onabort = () => reject(write.error);
-      });
-      return ownedAnalyses.length === analyses.length ? "migrated" as const : "migrated_partial" as const;
-    } finally {
-      legacy.close();
-    }
-  } finally {
-    scoped.close();
-  }
 }
 
 export async function saveAnalysis(
@@ -353,10 +256,6 @@ export async function getCleanupSettings(): Promise<CleanupSettings> {
       typeof record?.maxFollowers === "number"
         ? record.maxFollowers
         : DEFAULT_CLEANUP_SETTINGS.maxFollowers,
-    reciprocityChecks:
-      record?.reciprocityChecks && typeof record.reciprocityChecks === "object"
-        ? record.reciprocityChecks
-        : {},
   };
 }
 

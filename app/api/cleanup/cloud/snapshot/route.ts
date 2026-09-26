@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { mergeReciprocityChecks, type CleanupSettings } from "@/lib/rules/engine";
 import { getCloudIdentity } from "@/lib/cloud/auth";
 import {
   cloudDatabaseConfigured,
@@ -122,47 +121,10 @@ export async function POST(request: NextRequest) {
       ? body.sourceFile.slice(0, 500)
       : null;
 
-  // The old client could upload a different user's local snapshot after
-  // changing the Instagram login. Reject it on the server, not just in the UI.
-  const matched = sourceFile?.match(/^instagram-([a-z0-9._]+)-\d{4}-\d{2}-\d{2}(?:-|\.|$)/i);
-  if (body?.ownerId !== identity.ownerId ||
-      !matched || matched[1].toLowerCase() !== identity.username) {
-    return NextResponse.json({ error: "account_mismatch" }, { status: 409 });
-  }
-
   const analysisCreatedAt = parseDate(body?.analysisCreatedAt);
 
   await ensureCloudSchema();
   const sql = getCloudSql();
-
-  // Older devices can upload a snapshot without the new confirmations.
-  // Merge by confirmation date instead of allowing a stale upload to erase
-  // a "follows" safety decision stored in the cloud.
-  const previous = await sql.query(
-    "SELECT settings, source_file FROM followclean_cleanup_snapshot WHERE owner_id = $1",
-    [identity.ownerId],
-  );
-  const previousMatch = typeof previous[0]?.source_file === "string"
-    ? previous[0].source_file.match(/^instagram-([a-z0-9._]+)-\d{4}-\d{2}-\d{2}(?:-|\.|$)/i)
-    : null;
-  if (previous.length && (!previousMatch ||
-      previousMatch[1].toLowerCase() !== identity.username)) {
-    // Preserve the contaminated legacy checkpoint and queue for recovery.
-    // Do not merge its old protections into the new account.
-    return NextResponse.json({ error: "legacy_cloud_quarantined" }, { status: 409 });
-  }
-  const storedSettings = previous[0]?.settings &&
-    typeof previous[0].settings === "object"
-      ? previous[0].settings as Record<string, unknown>
-      : {};
-  const incomingSettings = settings as Record<string, unknown>;
-  const mergedSettings = {
-    ...incomingSettings,
-    reciprocityChecks: mergeReciprocityChecks(
-      storedSettings.reciprocityChecks as CleanupSettings["reciprocityChecks"],
-      incomingSettings.reciprocityChecks as CleanupSettings["reciprocityChecks"],
-    ),
-  };
 
   await sql.query(
     `
@@ -194,7 +156,7 @@ export async function POST(request: NextRequest) {
       sourceFile,
       analysisCreatedAt.toISOString(),
       JSON.stringify(protectedProfiles),
-      JSON.stringify(mergedSettings),
+      JSON.stringify(settings),
     ],
   );
 

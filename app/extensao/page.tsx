@@ -55,7 +55,7 @@ export default function ExtensaoPage() {
               </div>
               <div>
                 <h2 className="font-black text-slate-950">Chrome / Edge no computador</h2>
-                <p className="text-sm text-slate-500">FollowClean Assist v0.4.2</p>
+                <p className="text-sm text-slate-500">FollowClean Assist v0.4.1</p>
               </div>
             </div>
 
@@ -64,7 +64,7 @@ export default function ExtensaoPage() {
               <li><strong>2.</strong> Baixe o projeto atualizado e extraia o ZIP.</li>
               <li><strong>3.</strong> Copie os arquivos da nova pasta <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">extension</code> sobre a <strong>mesma pasta</strong> usada pela extensão atual.</li>
               <li><strong>4.</strong> Abra <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">chrome://extensions</code> e clique em <strong>Recarregar</strong> no FollowClean Assist.</li>
-              <li><strong>5.</strong> Confirme que aparece a versão <strong>0.4.2</strong> e que não há erros.</li>
+              <li><strong>5.</strong> Confirme que aparece a versão <strong>0.4.1</strong> e que não há erros.</li>
               <li><strong>6.</strong> Volte à página Limpeza e clique em <strong>Sincronizar</strong> antes de iniciar a verificação contínua.</li>
               <li><strong>7.</strong> Para deixar durante a madrugada, mantenha o Chrome e o computador ligados; a extensão salva checkpoints e retoma após reinicialização do Chrome.</li>
             </ol>
@@ -104,9 +104,8 @@ export default function ExtensaoPage() {
             <div>
               <h2 className="font-black text-emerald-950">Como a revisão funciona</h2>
               <p className="mt-2 text-sm leading-6 text-emerald-900">
-                O FollowClean envia os possíveis não seguidores da exportação
-                que ainda estão sem contagem conhecida. O botão Revisar todos de cada categoria
-                força uma nova leitura, preservando os resultados antigos até a conclusão. A extensão abre um
+                O FollowClean envia apenas os usuários que não seguem você de
+                volta e ainda estão sem contagem conhecida. A extensão abre um
                 perfil por vez e registra a contagem visível. A execução não
                 para mais em lotes fixos de 50. Se o Instagram solicitar login,
                 checkpoint ou verificação, a extensão pausa automaticamente.

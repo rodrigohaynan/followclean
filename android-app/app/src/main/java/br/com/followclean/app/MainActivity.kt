@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.content.ClipboardManager
-import android.content.SharedPreferences
 import android.graphics.Color
 import android.text.TextUtils
 import android.net.Uri
@@ -27,7 +26,6 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.LinearLayout
-import android.widget.Button
 import android.widget.TextView
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
@@ -40,26 +38,16 @@ class MainActivity : Activity() {
     private lateinit var mainWebView: WebView
     private lateinit var scannerWebView: WebView
     private lateinit var statusView: TextView
-    private lateinit var root: LinearLayout
-    private lateinit var scannerLoginButton: Button
-    private var scannerLoginVisible = false
     private var lastStatusMessage = "Pronto"
     private var statusExpanded = false
 
     private val handler = Handler(Looper.getMainLooper())
-    // The old preferences remain intact as a recovery archive. Each Instagram
-    // account has a separate native cache, batch, failures and app snapshot.
-    private val legacyPrefs by lazy { getSharedPreferences("followclean_android", MODE_PRIVATE) }
-    private var scopedPrefs: SharedPreferences? = null
-    private var activeOwnerId: String? = null
-    private val prefs: SharedPreferences get() = scopedPrefs ?: legacyPrefs
+    private val prefs by lazy { getSharedPreferences("followclean_android", MODE_PRIVATE) }
 
     private var queue: List<String> = emptyList()
     private var running = false
     private var currentIndex = 0
     private var processedThisRun = 0
-    // Keep prior successful readings until each forced recheck succeeds.
-    private val forceRecheckUsernames = mutableSetOf<String>()
     private var currentUsername: String? = null
     private var extractionAttempts = 0
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
@@ -106,13 +94,7 @@ class MainActivity : Activity() {
             alpha = 0.01f
         }
 
-        scannerLoginButton = Button(this).apply {
-            text = "Voltar ao FollowClean"
-            visibility = View.GONE
-            setOnClickListener { closeScannerLogin() }
-        }
-
-        root = LinearLayout(this).apply {
+        val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.rgb(246, 248, 251))
             setOnApplyWindowInsetsListener { view, insets ->
@@ -139,13 +121,6 @@ class MainActivity : Activity() {
                 )
             )
             addView(
-                scannerLoginButton,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            )
-            addView(
                 mainWebView,
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -159,7 +134,8 @@ class MainActivity : Activity() {
 
         configureMainWebView()
         configureScannerWebView()
-        // Never resume or expose a legacy scan until the verified account is bound.
+        restoreState()
+
         if (!handleIncomingIntent(intent)) {
             mainWebView.loadUrl("https://followclean.netlify.app/limpeza")
         }
@@ -522,8 +498,10 @@ class MainActivity : Activity() {
             loadsImagesAutomatically = false
             blockNetworkImage = true
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            // Use a normal Android browser identity in the scanner WebView.
-            userAgentString = WebSettings.getDefaultUserAgent(this@MainActivity)
+            userAgentString =
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 " +
+                "FollowCleanScanner/0.2"
         }
 
         CookieManager.getInstance().setAcceptThirdPartyCookies(scannerWebView, true)
@@ -579,167 +557,10 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showScannerLogin() {
-        if (running) {
-            sendBatchStatus("Pause o lote antes de abrir o Instagram do scanner.")
-            return
-        }
-        scannerLoginVisible = true
-        scannerWebView.settings.loadsImagesAutomatically = true
-        scannerWebView.settings.blockNetworkImage = false
-        // Sign in using the SAME WebView that performs the scan. A session
-        // in Chrome, the Instagram app or Meta OAuth is not this session.
-        mainWebView.visibility = View.GONE
-        scannerLoginButton.visibility = View.VISIBLE
-        scannerWebView.alpha = 1f
-        scannerWebView.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
-        )
-        scannerWebView.requestFocus()
-        val currentUrl = scannerWebView.url.orEmpty()
-        if (!currentUrl.startsWith("https://www.instagram.com/") &&
-            !currentUrl.startsWith("https://instagram.com/")) {
-            scannerWebView.loadUrl("https://www.instagram.com/accounts/login/")
-        }
-        updateStatus("Instagram do scanner · entre nesta tela e toque em Voltar ao FollowClean.")
-    }
-
-    private fun closeScannerLogin() {
-        scannerLoginVisible = false
-        CookieManager.getInstance().flush()
-        scannerWebView.settings.loadsImagesAutomatically = false
-        scannerWebView.settings.blockNetworkImage = true
-        scannerWebView.clearFocus()
-        scannerWebView.alpha = 0.01f
-        scannerWebView.layoutParams = LinearLayout.LayoutParams(1, 1)
-        scannerLoginButton.visibility = View.GONE
-        mainWebView.visibility = View.VISIBLE
-        mainWebView.requestFocus()
-        updateStatus("Voltou ao FollowClean. Toque em Retomar lote para testar a sessão do scanner.")
-        sendBatchStatus("Login do scanner encerrado. Toque em Retomar lote para continuar.")
-    }
-
-    private fun resumeBatch() {
-        if (running) {
-            sendBatchStatus("O lote já está em execução.")
-            return
-        }
-        if (scannerLoginVisible) {
-            sendBatchStatus("Volte ao FollowClean antes de retomar a verificação.")
-            return
-        }
-        if (queue.isEmpty() || currentIndex >= queue.size) {
-            sendBatchStatus("Não há lote pausado a retomar. Use Revisar todos na seção desejada.")
-            return
-        }
-        if (!hasValidatedInternet()) {
-            sendBatchStatus("Sem acesso à internet. Lote permanece pausado.")
-            return
-        }
-        CookieManager.getInstance().flush()
-        running = true
-        currentUsername = null
-        persistState()
-        startVerificationForeground("Retomando lote de verificacao")
-        sendBatchStatus("Retomando lote pausado.")
-        processNext()
-    }
-
-    private fun bindAccount(owner: String, username: String) {
-        if (!owner.matches(Regex("[a-zA-Z0-9_-]{1,100}")) ||
-            !username.matches(Regex("[a-zA-Z0-9._]{1,30}"))) {
-            updateStatus("Identidade inválida. Scanner bloqueado.")
-            return
-        }
-        if (activeOwnerId != owner) {
-            if (running) pauseBatch("Conta alterada. Lote antigo pausado.")
-            handler.removeCallbacksAndMessages(null)
-            stopVerificationForeground()
-            activeOwnerId = owner
-            val destination = getSharedPreferences("followclean_android_account_$owner", MODE_PRIVATE)
-            if (!destination.getBoolean("legacy_migration_checked", false)) {
-                val old = legacyPrefs.getString("app_snapshot", null)
-                val snapshot = runCatching { JSONObject(old.orEmpty()) }.getOrNull()
-                val file = snapshot?.optJSONObject("latest")?.optString("sourceFile").orEmpty()
-                val original = Regex("^instagram-([a-z0-9._]+)-\\d{4}-\\d{2}-\\d{2}(?:-|\\.|$)", RegexOption.IGNORE_CASE)
-                    .find(file)?.groupValues?.getOrNull(1)?.lowercase()
-                if (original == username.lowercase()) {
-                    // Preserve the old archive. Legacy native caches may already
-                    // contain results gathered after a second login, so migrate
-                    // only usernames that existed in this account's export.
-                    val following = snapshot?.optJSONObject("latest")
-                        ?.optJSONObject("analysis")?.optJSONArray("following") ?: JSONArray()
-                    val eligible = jsonArrayToUsernames(following).toSet()
-                    val editor = destination.edit()
-                    for ((key, value) in legacyPrefs.all) {
-                        if (key == "results" || key == "failures") {
-                            val source = runCatching { JSONObject(value as? String ?: "") }
-                                .getOrDefault(JSONObject())
-                            val filtered = JSONObject()
-                            for (entry in eligible) {
-                                if (source.has(entry)) filtered.put(entry, source.get(entry))
-                            }
-                            editor.putString(key, filtered.toString())
-                        } else if (key == "queue" || key == "forceRecheckUsernames") {
-                            val oldQueue = runCatching { JSONArray(value as? String ?: "") }
-                                .getOrDefault(JSONArray())
-                            editor.putString(key, JSONArray(
-                                jsonArrayToUsernames(oldQueue).filter { eligible.contains(it) }
-                            ).toString())
-                        } else if (key == "currentIndex" || key == "processedThisRun" ||
-                            key == "running" || key == "currentUsername" ||
-                            key == "oauth_pending") {
-                            // Old queue cursors, pending OAuth and a running state
-                            // cannot safely be resumed under a new account binding.
-                            continue
-                        } else {
-                            when (value) {
-                                is String -> editor.putString(key, value)
-                                is Boolean -> editor.putBoolean(key, value)
-                                is Int -> editor.putInt(key, value)
-                                is Long -> editor.putLong(key, value)
-                                is Float -> editor.putFloat(key, value)
-                            }
-                        }
-                    }
-                    editor.putString("legacy_migrated_from", username.lowercase()).apply()
-                }
-                destination.edit().putBoolean("legacy_migration_checked", true).apply()
-            }
-            scopedPrefs = destination
-            queue = emptyList()
-            currentIndex = 0
-            processedThisRun = 0
-            forceRecheckUsernames.clear()
-            currentUsername = null
-            running = false
-            restoreState()
-        }
-        sendToWeb(JSONObject()
-            .put("source", "followclean-android")
-            .put("type", "ACCOUNT_READY")
-            .put("version", "0.3.22")
-        )
-        sendReadyToWeb()
-        sendResultsToWeb()
-        sendAppSnapshotToWeb()
-    }
-
     private fun handleWebCommand(raw: String) {
         runCatching {
             val json = JSONObject(raw)
-            val type = json.optString("type")
-            if (type == "SET_ACCOUNT") {
-                bindAccount(json.optString("ownerId"), json.optString("username"))
-                return@runCatching
-            }
-            if (activeOwnerId == null &&
-                type != "START_OAUTH" && type != "PING" &&
-                type != "SAVE_BACKUP_FILE" && type != "OPEN_BACKUP_FILE") {
-                updateStatus("Conecte o Instagram para isolar os dados do scanner.")
-                return@runCatching
-            }
-            when (type) {
+            when (json.optString("type")) {
                 "PING" -> sendReadyToWeb()
                 "GET_RESULTS" -> sendResultsToWeb()
                 "RESET_ANDROID_FAILURES" -> resetAndroidFailures(json.optJSONArray("usernames"))
@@ -754,13 +575,11 @@ class MainActivity : Activity() {
                 "CLOUD_SYNCED" -> markCloudSynced()
                 "START_OAUTH" -> startInstagramOAuth()
                 "PAUSE_BATCH" -> pauseBatch("Pausado pelo usuário.")
-                "OPEN_SCANNER_LOGIN" -> showScannerLogin()
-                "RESUME_BATCH" -> resumeBatch()
                 "OPEN_PROFILE" -> openInstagramProfile(json.optString("username"))
                 "REVIEW_PROFILE" -> reviewProfile(json.optString("username"))
                 "START_BATCH" -> {
                     val usernames = json.optJSONArray("usernames") ?: JSONArray()
-                    startBatch(jsonArrayToUsernames(usernames), json.optBoolean("forceRecheck", false))
+                    startBatch(jsonArrayToUsernames(usernames))
                 }
             }
         }.onFailure {
@@ -873,23 +692,13 @@ class MainActivity : Activity() {
         mainWebView.loadUrl(connectUrl)
     }
 
-    private fun startBatch(usernames: List<String>, forceRecheck: Boolean = false) {
-        if (activeOwnerId == null) {
-            updateStatus("Scanner bloqueado: conecte uma conta antes de verificar.")
-            return
-        }
-        if (running) {
-            sendBatchStatus("Há uma verificação em andamento. Pause antes de iniciar outra fila.")
-            return
-        }
+    private fun startBatch(usernames: List<String>) {
         if (usernames.isEmpty()) {
             sendBatchStatus("Nenhum perfil pendente para verificar.")
             return
         }
 
         queue = usernames.distinct()
-        forceRecheckUsernames.clear()
-        if (forceRecheck) forceRecheckUsernames.addAll(queue)
         currentIndex = 0
         processedThisRun = 0
         running = true
@@ -934,9 +743,7 @@ class MainActivity : Activity() {
         }
 
         val results = readResults()
-        while (currentIndex < queue.size &&
-            results.has(queue[currentIndex]) &&
-            !forceRecheckUsernames.contains(queue[currentIndex])) {
+        while (currentIndex < queue.size && results.has(queue[currentIndex])) {
             currentIndex++
         }
 
@@ -1001,7 +808,6 @@ class MainActivity : Activity() {
 
             if (unavailable) {
                 saveFailure(username, "unavailable")
-                forceRecheckUsernames.remove(username)
                 processedThisRun++
                 currentIndex++
                 currentUsername = null
@@ -1023,13 +829,12 @@ class MainActivity : Activity() {
 
             saveResult(username, followersCount)
             clearFailure(username)
-            forceRecheckUsernames.remove(username)
             processedThisRun++
             currentIndex++
             currentUsername = null
             persistState()
 
-            val message = "@$username: $followersCount seguidores (contagem atualizada)"
+            val message = "@$username: $followersCount seguidores"
             updateStatus(message)
             sendProfileResultToWeb(username, followersCount)
             sendResultsToWeb()
@@ -1063,7 +868,6 @@ class MainActivity : Activity() {
             return
         }
         saveFailure(username, "no_response")
-        forceRecheckUsernames.remove(username)
         processedThisRun++
         currentIndex++
         currentUsername = null
@@ -1185,7 +989,7 @@ class MainActivity : Activity() {
             JSONObject()
                 .put("source", "followclean-android")
                 .put("type", "READY")
-                .put("version", "0.3.22")
+                .put("version", "0.3.18")
                 .put("snapshotSavedAt", prefs.getString("app_snapshot_saved_at", null))
                 .put("cloudSyncPending", prefs.getBoolean("cloud_sync_pending", false))
                 .put("lastCloudSyncAt", prefs.getString("last_cloud_sync_at", null))
@@ -1246,10 +1050,6 @@ class MainActivity : Activity() {
     }
 
     private fun saveAppSnapshot(input: JSONObject) {
-        if (activeOwnerId == null || input.optString("ownerId") != activeOwnerId) {
-            sendBatchStatus("Backup recusado: a conta não corresponde ao scanner.")
-            return
-        }
         val snapshot = JSONObject(input.toString())
             .put("nativeResults", readResults())
             .put("nativeFailures", readFailures())
@@ -1292,7 +1092,6 @@ class MainActivity : Activity() {
     }
 
     private fun sendAppSnapshotToWeb() {
-        if (activeOwnerId == null) return
         val raw = prefs.getString("app_snapshot", null)
         val snapshot =
             if (raw.isNullOrBlank()) null
@@ -1405,7 +1204,6 @@ class MainActivity : Activity() {
     }
 
     private fun sendBatchStatus(message: String) {
-        prefs.edit().putString("lastBatchMessage", message).apply()
         sendToWeb(
             JSONObject()
                 .put("source", "followclean-android")
@@ -1417,16 +1215,12 @@ class MainActivity : Activity() {
     private fun batchJson(): JSONObject {
         return JSONObject()
             .put("running", running)
-            .put("ownerId", activeOwnerId)
             .put("currentUsername", currentUsername)
             .put("processedThisRun", processedThisRun)
             .put("queueTotal", queue.size)
-            .put("resumeAvailable", !running && currentIndex < queue.size && queue.isNotEmpty())
-            .put("lastMessage", prefs.getString("lastBatchMessage", "") ?: "")
     }
 
     private fun sendToWeb(payload: JSONObject) {
-        payload.put("ownerId", activeOwnerId)
         val script = "window.postMessage(${payload}, '*');"
         mainWebView.post {
             mainWebView.evaluateJavascript(script, null)
@@ -1454,7 +1248,6 @@ class MainActivity : Activity() {
     private fun persistState() {
         prefs.edit()
             .putString("queue", JSONArray(queue).toString())
-            .putString("forceRecheckUsernames", JSONArray(forceRecheckUsernames.toList()).toString())
             .putInt("currentIndex", currentIndex)
             .putInt("processedThisRun", processedThisRun)
             .putBoolean("running", running)
@@ -1470,12 +1263,6 @@ class MainActivity : Activity() {
         }.getOrDefault(emptyList())
 
         currentIndex = prefs.getInt("currentIndex", 0)
-        forceRecheckUsernames.clear()
-        val storedForce = prefs.getString("forceRecheckUsernames", null)
-        if (!storedForce.isNullOrBlank()) {
-            runCatching { jsonArrayToUsernames(JSONArray(storedForce)) }
-                .getOrDefault(emptyList()).forEach { forceRecheckUsernames.add(it) }
-        }
         processedThisRun = prefs.getInt("processedThisRun", 0)
         running = false
         currentUsername = null
@@ -1573,9 +1360,7 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() {
-        if (scannerLoginVisible) {
-            closeScannerLogin()
-        } else if (mainWebView.canGoBack()) {
+        if (mainWebView.canGoBack()) {
             mainWebView.goBack()
         } else {
             super.onBackPressed()

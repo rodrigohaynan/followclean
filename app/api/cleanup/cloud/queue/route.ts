@@ -23,9 +23,6 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => ({}));
-  if (body?.ownerId !== identity.ownerId) {
-    return NextResponse.json({ error: "account_mismatch" }, { status: 409 });
-  }
   const usernames = normalizeUsernames(body?.usernames);
   if (!usernames.length) {
     return NextResponse.json({ configured: true, added: 0 });
