@@ -24,6 +24,7 @@ import {
   encodeFollowCleanBackup,
   salvageFollowCleanBackup,
 } from "@/lib/storage/backup";
+import { useActiveInstagramAccount } from "@/lib/storage/account-scope";
 import {
   getAnalyses,
   getCleanupSettings,
@@ -36,6 +37,7 @@ import {
   unprotectProfile,
   upsertProfileMetadataBatch,
   type ProtectedProfile,
+  sourceFileBelongsToAccount,
   type StoredAnalysis,
 } from "@/lib/storage/indexeddb";
 
@@ -90,6 +92,7 @@ function unavailableReasonLabel(reason: string) {
 }
 
 export function CleanupManager() {
+  const { account, loading: accountLoading, error: accountError, migration } = useActiveInstagramAccount();
   const [latest, setLatest] = useState<StoredAnalysis | null>(null);
   const [protectedProfiles, setProtectedProfiles] = useState<ProtectedProfile[]>([]);
   const [profileMetadata, setProfileMetadata] = useState<ProfileMetadata[]>([]);
@@ -125,6 +128,17 @@ export function CleanupManager() {
   const [restoreBackupStatus, setRestoreBackupStatus] = useState("");
 
   async function applyCloudState(state: Record<string, unknown>) {
+    if (!account) return;
+    const rawSnapshot = state?.snapshot as Record<string, unknown> | null | undefined;
+    if (
+      rawSnapshot?.source_file &&
+      typeof rawSnapshot.source_file === "string" &&
+      !sourceFileBelongsToAccount(rawSnapshot.source_file, account.username)
+    ) {
+      setCloudNote("Checkpoint de outra conta ignorado. Os dados locais desta conta permanecem separados.");
+      return;
+    }
+
     const summary = state?.summary as Record<string, unknown> | undefined;
     if (summary) {
       setCloudSummary({
@@ -277,15 +291,19 @@ export function CleanupManager() {
   }
 
   useEffect(() => {
+    if (!account) return;
+    setLoading(true);
     Promise.all([getAnalyses(), getProtectedProfiles(), getCleanupSettings(), getProfileMetadata()])
       .then(([history, protectedList, storedSettings, metadata]) => {
         setLatest(history[0] ?? null);
         setProtectedProfiles(protectedList);
         setSettings(storedSettings);
         setProfileMetadata(metadata);
+        setExtensionFailures([]);
+        setReviewFlags({});
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [account]);
 
   useEffect(() => {
     function mergeMetadata(records: ProfileMetadata[]) {
@@ -297,7 +315,7 @@ export function CleanupManager() {
     }
 
     function handleMessage(event: MessageEvent) {
-      if (event.source !== window) return;
+      if (event.source !== window || !account) return;
 
       const data = event.data as {
         source?: string;
@@ -458,7 +476,8 @@ export function CleanupManager() {
               typeof record.id === "string" &&
               typeof record.createdAt === "string" &&
               typeof record.sourceFile === "string" &&
-              record.analysis
+              record.analysis &&
+              sourceFileBelongsToAccount(record.sourceFile, account.username)
             ) {
               setLatest((current) =>
                 !current || record.createdAt > current.createdAt
@@ -613,7 +632,9 @@ export function CleanupManager() {
           }
 
           if (snapshotFailures.length) {
-            setExtensionFailures((current) => {
+            if (!latest.analysis.notFollowingBack.includes(failure.username)) return;
+
+          setExtensionFailures((current) => {
               const map = new Map(
                 current.map((item) => [item.username, item] as const),
               );
@@ -637,6 +658,7 @@ export function CleanupManager() {
       }
 
       if (data.type === "PROFILE_RESULT" && fromAndroid && data.result) {
+        if (!latest) return;
         const item = data.result;
         if (
           typeof item.username === "string" &&
@@ -655,6 +677,8 @@ export function CleanupManager() {
                 ? item.updatedAt
                 : new Date().toISOString(),
           };
+
+          if (!latest.analysis.notFollowingBack.includes(record.username)) return;
 
           // Atualiza a classificação imediatamente na tela.
           mergeMetadata([record]);
@@ -712,6 +736,7 @@ export function CleanupManager() {
       }
 
       if (data.type === "PROFILE_UNAVAILABLE" && fromAndroid && data.failure) {
+        if (!latest) return;
         const item = data.failure;
         if (typeof item.username === "string") {
           const failure: UnavailableProfile = {
@@ -811,11 +836,15 @@ export function CleanupManager() {
       }
 
       if (data.type === "RESULTS") {
+        if (!latest) return;
+        const allowed = new Set(latest.analysis.notFollowingBack);
         if (Array.isArray(data.failures)) {
           const failures: UnavailableProfile[] = data.failures.flatMap((item) => {
             if (typeof item?.username !== "string") return [];
+            const normalized = item.username.trim().toLowerCase().replace(/^@/, "");
+            if (!allowed.has(normalized)) return [];
             return [{
-              username: item.username.trim().toLowerCase().replace(/^@/, ""),
+              username: normalized,
               reason: typeof item.reason === "string" ? item.reason : "unavailable",
               updatedAt:
                 typeof item.updatedAt === "string"
@@ -853,7 +882,8 @@ export function CleanupManager() {
         const records: ProfileMetadata[] = data.results.flatMap((item) => {
           if (
             typeof item?.username !== "string" ||
-            typeof item?.followersCount !== "number"
+            typeof item?.followersCount !== "number" ||
+            !allowed.has(item.username.trim().toLowerCase().replace(/^@/, ""))
           ) {
             return [];
           }
@@ -901,9 +931,10 @@ export function CleanupManager() {
     }
 
     return () => window.removeEventListener("message", handleMessage);
-  }, [cloudConfigured]);
+  }, [cloudConfigured, account, latest]);
 
   useEffect(() => {
+    if (!account) return;
     let cancelled = false;
 
     async function setupCloudSync() {
@@ -925,8 +956,15 @@ export function CleanupManager() {
         const token = typeof tokenData?.token === "string" ? tokenData.token : null;
         const accountUsername =
           typeof tokenData?.account?.username === "string"
-            ? tokenData.account.username
+            ? tokenData.account.username.toLowerCase()
             : null;
+        if (String(tokenData?.account?.id ?? "") !== account.id ||
+            accountUsername !== account.username) {
+          setCloudConfigured(false);
+          setCloudHydrated(true);
+          setCloudNote("A sessão mudou de conta. Atualize a página para continuar com segurança.");
+          return;
+        }
 
         if (cancelled) return;
 
@@ -979,7 +1017,7 @@ export function CleanupManager() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [account]);
 
   useEffect(() => {
     if (!cloudConfigured || !cloudHydrated || loading || !latest) return;
@@ -1133,7 +1171,8 @@ export function CleanupManager() {
   }
 
   function saveProgressToAppMemory() {
-    if (!androidReady || !latest || !androidBridge()?.postMessage) {
+    if (!account || !androidReady || !latest || !androidBridge()?.postMessage ||
+        !sourceFileBelongsToAccount(latest.sourceFile, account.username)) {
       return false;
     }
 
@@ -1141,6 +1180,7 @@ export function CleanupManager() {
       JSON.stringify({
         type: "SAVE_SNAPSHOT",
         snapshot: {
+          accountUsername: account.username,
           latest,
           protectedProfiles,
           settings,
@@ -1276,6 +1316,7 @@ export function CleanupManager() {
         salvaged = true;
       }
 
+      if (!account) throw new Error("Conecte o Instagram antes de restaurar um backup.");
       let restoredLatest: StoredAnalysis | null = null;
       let restoredProtected: ProtectedProfile[] = [];
       let restoredSettings = settings;
@@ -1288,7 +1329,9 @@ export function CleanupManager() {
           typeof record.id === "string" &&
           typeof record.createdAt === "string" &&
           typeof record.sourceFile === "string" &&
-          record.analysis
+          record.analysis &&
+          account &&
+          sourceFileBelongsToAccount(record.sourceFile, account.username)
         ) {
           await restoreAnalysisSnapshot(record);
           restoredLatest = record;
@@ -1468,6 +1511,10 @@ export function CleanupManager() {
   }
 
   async function uploadLocalProgressToCloud() {
+    if (!account || (latest && !sourceFileBelongsToAccount(latest.sourceFile, account.username))) {
+      setCloudNote("Sincronização bloqueada: os dados locais não pertencem à conta conectada.");
+      return false;
+    }
     if (!cloudConfigured) {
       setCloudNote("A nuvem ainda não está disponível nesta sessão.");
       return false;
