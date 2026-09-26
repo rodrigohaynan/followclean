@@ -14,9 +14,15 @@ import {
 } from "lucide-react";
 import { analyzeInstagramExport } from "@/lib/instagram/parser";
 import type { InstagramAnalysis } from "@/lib/instagram/types";
-import { saveAnalysis } from "@/lib/storage/indexeddb";
+import {
+  saveAnalysis,
+  sourceFileBelongsToAccount,
+  sourceFileAccount,
+} from "@/lib/storage/indexeddb";
+import { useActiveInstagramAccount } from "@/lib/storage/account-scope";
 
 export function ImportAnalyzer() {
+  const { account, loading: accountLoading, error: accountError } = useActiveInstagramAccount();
   const [analysis, setAnalysis] = useState<InstagramAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -32,12 +38,21 @@ export function ImportAnalyzer() {
   }, [analysis, query]);
 
   async function handleFile(file: File | undefined) {
-    if (!file) return;
+    if (!file || !account) return;
     setError(null);
     setAnalysis(null);
     setSaved(false);
     setLoading(true);
     setFileName(file.name);
+
+    const namedAccount = sourceFileAccount(file.name);
+    if (namedAccount && !sourceFileBelongsToAccount(file.name, account.username)) {
+      setLoading(false);
+      setError(
+        `Esse arquivo pertence a @${namedAccount}. A conta conectada é @${account.username}. Troque a conta ou selecione a exportação correta.`,
+      );
+      return;
+    }
 
     try {
       const result = await analyzeInstagramExport(file);
@@ -55,8 +70,21 @@ export function ImportAnalyzer() {
     }
   }
 
+  if (accountError) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950">
+        {accountError} <Link href="/conectar" className="font-black underline">Conectar Instagram</Link>
+      </div>
+    );
+  }
+
+  if (accountLoading || !account) {
+    return <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">Verificando a conta conectada...</div>;
+  }
+
   return (
     <div className="space-y-3 sm:space-y-6">
+      <p className="text-sm font-black text-blue-700">Importação para @{account.username}</p>
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6 md:p-8">
         <div className="flex flex-col gap-4 sm:gap-6 md:flex-row md:items-center md:justify-between">
           <div className="max-w-xl">
