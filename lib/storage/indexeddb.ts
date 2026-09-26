@@ -5,8 +5,46 @@ import {
   type ProfileMetadata,
 } from "@/lib/rules/engine";
 
-const DB_NAME = "followclean";
+const LEGACY_DB_NAME = "followclean";
 const DB_VERSION = 3;
+let activeAccountId: string | null = null;
+let activeUsername: string | null = null;
+
+export function setStorageAccount(accountId: string, username: string) {
+  const normalizedUsername = username.trim().toLowerCase().replace(/^@/, "");
+  if (
+    !/^[a-zA-Z0-9_-]{1,100}$/.test(accountId) ||
+    !/^[a-z0-9._]{1,30}$/.test(normalizedUsername)
+  ) {
+    throw new Error("Não foi possível identificar a conta conectada.");
+  }
+  activeAccountId = accountId;
+  activeUsername = normalizedUsername;
+}
+
+export function getStorageAccount() {
+  return activeAccountId && activeUsername
+    ? { id: activeAccountId, username: activeUsername }
+    : null;
+}
+
+function databaseName() {
+  if (!activeAccountId) {
+    throw new Error("Conecte o Instagram antes de acessar os dados locais.");
+  }
+  return `followclean-account-${activeAccountId}`;
+}
+
+export function sourceFileAccount(sourceFile: string) {
+  const match = /^instagram-([a-z0-9._]+)-\d{4}-\d{2}-\d{2}(?:-|\.|$)/i.exec(
+    sourceFile.trim(),
+  );
+  return match?.[1]?.toLowerCase() ?? null;
+}
+
+export function sourceFileBelongsToAccount(sourceFile: string, username: string) {
+  return sourceFileAccount(sourceFile) === username.trim().toLowerCase().replace(/^@/, "");
+}
 const ANALYSES_STORE = "analyses";
 const PROTECTED_STORE = "protected_profiles";
 const SETTINGS_STORE = "settings";
@@ -29,9 +67,9 @@ type StoredCleanupSettings = CleanupSettings & {
   id: "cleanup";
 };
 
-function openDatabase(): Promise<IDBDatabase> {
+function openDatabaseByName(name: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(name, DB_VERSION);
 
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -63,12 +101,98 @@ function openDatabase(): Promise<IDBDatabase> {
   });
 }
 
+function openDatabase(): Promise<IDBDatabase> {
+  return openDatabaseByName(databaseName());
+}
+
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () =>
       reject(request.error ?? new Error("Falha no armazenamento local."));
   });
+}
+
+export async function migrateLegacyDataForActiveAccount(): Promise<
+  "existing" | "empty" | "migrated" | "partial" | "not_owned"
+> {
+  const account = getStorageAccount();
+  if (!account) throw new Error("Conecte o Instagram antes de migrar os dados.");
+
+  const destination = await openDatabase();
+  try {
+    const existingTx = destination.transaction(ANALYSES_STORE, "readonly");
+    const existing = await requestToPromise(
+      existingTx.objectStore(ANALYSES_STORE).getAll() as IDBRequest<StoredAnalysis[]>,
+    );
+    if (existing.length) return "existing";
+
+    const legacy = await openDatabaseByName(LEGACY_DB_NAME);
+    try {
+      const tx = legacy.transaction(
+        [ANALYSES_STORE, PROTECTED_STORE, SETTINGS_STORE, PROFILE_METADATA_STORE],
+        "readonly",
+      );
+      const [analyses, protectedProfiles, settings, metadata] = await Promise.all([
+        requestToPromise(
+          tx.objectStore(ANALYSES_STORE).getAll() as IDBRequest<StoredAnalysis[]>,
+        ),
+        requestToPromise(
+          tx.objectStore(PROTECTED_STORE).getAll() as IDBRequest<ProtectedProfile[]>,
+        ),
+        requestToPromise(
+          tx.objectStore(SETTINGS_STORE).get("cleanup") as IDBRequest<
+            StoredCleanupSettings | undefined
+          >,
+        ),
+        requestToPromise(
+          tx.objectStore(PROFILE_METADATA_STORE).getAll() as IDBRequest<ProfileMetadata[]>,
+        ),
+      ]);
+
+      if (!analyses.length) return "empty";
+
+      const owned = analyses.filter((record) =>
+        sourceFileBelongsToAccount(record.sourceFile, account.username),
+      );
+      if (!owned.length) return "not_owned";
+
+      const everyAnalysisBelongsHere = owned.length === analyses.length;
+      const write = destination.transaction(
+        [ANALYSES_STORE, PROTECTED_STORE, SETTINGS_STORE, PROFILE_METADATA_STORE],
+        "readwrite",
+      );
+      const analysisStore = write.objectStore(ANALYSES_STORE);
+      for (const record of owned) analysisStore.put(record);
+
+      // Settings, protections and follower counts did not carry an owner in the
+      // old database. Copy them only when the complete old history is clearly
+      // from this account. Otherwise keep them untouched in the legacy archive.
+      if (everyAnalysisBelongsHere) {
+        const protectedStore = write.objectStore(PROTECTED_STORE);
+        for (const record of protectedProfiles) protectedStore.put(record);
+
+        if (settings) write.objectStore(SETTINGS_STORE).put(settings);
+
+        const metadataStore = write.objectStore(PROFILE_METADATA_STORE);
+        for (const record of metadata) metadataStore.put(record);
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        write.oncomplete = () => resolve();
+        write.onerror = () =>
+          reject(write.error ?? new Error("Falha ao migrar dados locais."));
+        write.onabort = () =>
+          reject(write.error ?? new Error("Migração local cancelada."));
+      });
+
+      return everyAnalysisBelongsHere ? "migrated" : "partial";
+    } finally {
+      legacy.close();
+    }
+  } finally {
+    destination.close();
+  }
 }
 
 export async function saveAnalysis(
