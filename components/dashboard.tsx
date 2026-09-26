@@ -14,6 +14,7 @@ import {
   TrendingUp,
   UsersRound,
 } from "lucide-react";
+import { useActiveInstagramAccount } from "@/lib/storage/account-scope";
 import {
   deleteAnalysis,
   getAnalyses,
@@ -28,14 +29,17 @@ function formatDate(value: string) {
 }
 
 export function Dashboard() {
+  const { account, loading: accountLoading, error, migration } = useActiveInstagramAccount();
   const [history, setHistory] = useState<StoredAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!account) return;
+    setLoading(true);
     getAnalyses()
       .then(setHistory)
       .finally(() => setLoading(false));
-  }, []);
+  }, [account]);
 
   const latest = history[0];
   const previous = history[1];
@@ -61,7 +65,15 @@ export function Dashboard() {
     setHistory((current) => current.filter((item) => item.id !== id));
   }
 
-  if (loading) {
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950">
+        {error} <Link href="/conectar" className="font-black underline">Conectar Instagram</Link>
+      </div>
+    );
+  }
+
+  if (loading || accountLoading || !account) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm sm:rounded-[2rem] sm:p-8">
         Carregando histórico local...
@@ -73,7 +85,12 @@ export function Dashboard() {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-sm sm:rounded-[2rem] sm:p-10">
         <Database className="mx-auto text-slate-300" size={42} />
-        <h2 className="mt-4 text-xl font-black text-slate-950">Nenhuma análise salva ainda</h2>
+        <h2 className="mt-4 text-xl font-black text-slate-950">Nenhuma importação de @{account.username}</h2>
+        {migration === "not_owned" || migration === "partial" ? (
+          <p className="mx-auto mt-2 max-w-xl text-sm font-semibold leading-6 text-amber-700">
+            Há dados antigos de outra conta preservados neste dispositivo, mas eles não foram carregados neste perfil.
+          </p>
+        ) : null}
         <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">
           Importe o arquivo oficial do Instagram. O resultado será salvo somente neste dispositivo.
         </p>
@@ -96,6 +113,7 @@ export function Dashboard() {
 
   return (
     <div className="space-y-3 sm:space-y-6">
+      <p className="text-sm font-black text-blue-700">Conta ativa: @{account.username}</p>
       <section className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:gap-4 sm:rounded-[2rem] sm:p-6 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-blue-600">

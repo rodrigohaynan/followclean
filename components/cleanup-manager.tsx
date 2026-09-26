@@ -24,6 +24,7 @@ import {
   encodeFollowCleanBackup,
   salvageFollowCleanBackup,
 } from "@/lib/storage/backup";
+import { useActiveInstagramAccount } from "@/lib/storage/account-scope";
 import {
   getAnalyses,
   getCleanupSettings,
@@ -36,6 +37,7 @@ import {
   unprotectProfile,
   upsertProfileMetadataBatch,
   type ProtectedProfile,
+  sourceFileBelongsToAccount,
   type StoredAnalysis,
 } from "@/lib/storage/indexeddb";
 
@@ -90,6 +92,7 @@ function unavailableReasonLabel(reason: string) {
 }
 
 export function CleanupManager() {
+  const { account, loading: accountLoading, error: accountError, migration } = useActiveInstagramAccount();
   const [latest, setLatest] = useState<StoredAnalysis | null>(null);
   const [protectedProfiles, setProtectedProfiles] = useState<ProtectedProfile[]>([]);
   const [profileMetadata, setProfileMetadata] = useState<ProfileMetadata[]>([]);
@@ -125,6 +128,19 @@ export function CleanupManager() {
   const [restoreBackupStatus, setRestoreBackupStatus] = useState("");
 
   async function applyCloudState(state: Record<string, unknown>) {
+    if (!account) return;
+    const rawSnapshot = state?.snapshot as Record<string, unknown> | null | undefined;
+    if (
+      rawSnapshot?.analysis &&
+      (
+        typeof rawSnapshot.source_file !== "string" ||
+        !sourceFileBelongsToAccount(rawSnapshot.source_file, account.username)
+      )
+    ) {
+      setCloudNote("Checkpoint de outra conta ignorado. Os dados locais desta conta permanecem separados.");
+      return;
+    }
+
     const summary = state?.summary as Record<string, unknown> | undefined;
     if (summary) {
       setCloudSummary({
@@ -277,15 +293,19 @@ export function CleanupManager() {
   }
 
   useEffect(() => {
+    if (!account) return;
+    setLoading(true);
     Promise.all([getAnalyses(), getProtectedProfiles(), getCleanupSettings(), getProfileMetadata()])
       .then(([history, protectedList, storedSettings, metadata]) => {
         setLatest(history[0] ?? null);
         setProtectedProfiles(protectedList);
         setSettings(storedSettings);
         setProfileMetadata(metadata);
+        setExtensionFailures([]);
+        setReviewFlags({});
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [account]);
 
   useEffect(() => {
     function mergeMetadata(records: ProfileMetadata[]) {
@@ -297,7 +317,7 @@ export function CleanupManager() {
     }
 
     function handleMessage(event: MessageEvent) {
-      if (event.source !== window) return;
+      if (event.source !== window || !account) return;
 
       const data = event.data as {
         source?: string;
@@ -451,6 +471,20 @@ export function CleanupManager() {
 
         if (data.snapshot && typeof data.snapshot === "object") {
           const snapshot = data.snapshot as Record<string, unknown>;
+          const snapshotLatest =
+            snapshot.latest && typeof snapshot.latest === "object"
+              ? snapshot.latest as StoredAnalysis
+              : null;
+          if (
+            !snapshotLatest ||
+            typeof snapshotLatest.sourceFile !== "string" ||
+            !sourceFileBelongsToAccount(snapshotLatest.sourceFile, account.username)
+          ) {
+            setExtensionNote(
+              `Dados do aplicativo pertencentes a outra conta foram ignorados. Conta ativa: @${account.username}.`,
+            );
+            return;
+          }
 
           if (snapshot.latest && typeof snapshot.latest === "object") {
             const record = snapshot.latest as StoredAnalysis;
@@ -458,7 +492,8 @@ export function CleanupManager() {
               typeof record.id === "string" &&
               typeof record.createdAt === "string" &&
               typeof record.sourceFile === "string" &&
-              record.analysis
+              record.analysis &&
+              sourceFileBelongsToAccount(record.sourceFile, account.username)
             ) {
               setLatest((current) =>
                 !current || record.createdAt > current.createdAt
@@ -613,15 +648,21 @@ export function CleanupManager() {
           }
 
           if (snapshotFailures.length) {
-            setExtensionFailures((current) => {
-              const map = new Map(
-                current.map((item) => [item.username, item] as const),
-              );
-              for (const item of snapshotFailures) {
-                map.set(item.username, item);
-              }
-              return Array.from(map.values());
-            });
+            const allowedSnapshot = new Set(snapshotLatest.analysis.notFollowingBack);
+            const eligibleFailures = snapshotFailures.filter((item) =>
+              allowedSnapshot.has(item.username),
+            );
+            if (eligibleFailures.length) {
+              setExtensionFailures((current) => {
+                const map = new Map(
+                  current.map((item) => [item.username, item] as const),
+                );
+                for (const item of eligibleFailures) {
+                  map.set(item.username, item);
+                }
+                return Array.from(map.values());
+              });
+            }
           }
         }
         return;
@@ -637,6 +678,7 @@ export function CleanupManager() {
       }
 
       if (data.type === "PROFILE_RESULT" && fromAndroid && data.result) {
+        if (!latest) return;
         const item = data.result;
         if (
           typeof item.username === "string" &&
@@ -655,6 +697,8 @@ export function CleanupManager() {
                 ? item.updatedAt
                 : new Date().toISOString(),
           };
+
+          if (!latest.analysis.notFollowingBack.includes(record.username)) return;
 
           // Atualiza a classificação imediatamente na tela.
           mergeMetadata([record]);
@@ -712,6 +756,7 @@ export function CleanupManager() {
       }
 
       if (data.type === "PROFILE_UNAVAILABLE" && fromAndroid && data.failure) {
+        if (!latest) return;
         const item = data.failure;
         if (typeof item.username === "string") {
           const failure: UnavailableProfile = {
@@ -811,11 +856,15 @@ export function CleanupManager() {
       }
 
       if (data.type === "RESULTS") {
+        if (!latest) return;
+        const allowed = new Set(latest.analysis.notFollowingBack);
         if (Array.isArray(data.failures)) {
           const failures: UnavailableProfile[] = data.failures.flatMap((item) => {
             if (typeof item?.username !== "string") return [];
+            const normalized = item.username.trim().toLowerCase().replace(/^@/, "");
+            if (!allowed.has(normalized)) return [];
             return [{
-              username: item.username.trim().toLowerCase().replace(/^@/, ""),
+              username: normalized,
               reason: typeof item.reason === "string" ? item.reason : "unavailable",
               updatedAt:
                 typeof item.updatedAt === "string"
@@ -853,7 +902,8 @@ export function CleanupManager() {
         const records: ProfileMetadata[] = data.results.flatMap((item) => {
           if (
             typeof item?.username !== "string" ||
-            typeof item?.followersCount !== "number"
+            typeof item?.followersCount !== "number" ||
+            !allowed.has(item.username.trim().toLowerCase().replace(/^@/, ""))
           ) {
             return [];
           }
@@ -901,9 +951,11 @@ export function CleanupManager() {
     }
 
     return () => window.removeEventListener("message", handleMessage);
-  }, [cloudConfigured]);
+  }, [cloudConfigured, account, latest]);
 
   useEffect(() => {
+    if (!account) return;
+    const activeAccount = account;
     let cancelled = false;
 
     async function setupCloudSync() {
@@ -925,8 +977,15 @@ export function CleanupManager() {
         const token = typeof tokenData?.token === "string" ? tokenData.token : null;
         const accountUsername =
           typeof tokenData?.account?.username === "string"
-            ? tokenData.account.username
+            ? tokenData.account.username.toLowerCase()
             : null;
+        if (String(tokenData?.account?.id ?? "") !== activeAccount.id ||
+            accountUsername !== activeAccount.username) {
+          setCloudConfigured(false);
+          setCloudHydrated(true);
+          setCloudNote("A sessão mudou de conta. Atualize a página para continuar com segurança.");
+          return;
+        }
 
         if (cancelled) return;
 
@@ -979,7 +1038,7 @@ export function CleanupManager() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [account]);
 
   useEffect(() => {
     if (!cloudConfigured || !cloudHydrated || loading || !latest) return;
@@ -1133,7 +1192,8 @@ export function CleanupManager() {
   }
 
   function saveProgressToAppMemory() {
-    if (!androidReady || !latest || !androidBridge()?.postMessage) {
+    if (!account || !androidReady || !latest || !androidBridge()?.postMessage ||
+        !sourceFileBelongsToAccount(latest.sourceFile, account.username)) {
       return false;
     }
 
@@ -1141,6 +1201,7 @@ export function CleanupManager() {
       JSON.stringify({
         type: "SAVE_SNAPSHOT",
         snapshot: {
+          accountUsername: account.username,
           latest,
           protectedProfiles,
           settings,
@@ -1276,6 +1337,21 @@ export function CleanupManager() {
         salvaged = true;
       }
 
+      if (!account) throw new Error("Conecte o Instagram antes de restaurar um backup.");
+      const backupLatest =
+        backup.latest && typeof backup.latest === "object"
+          ? backup.latest as StoredAnalysis
+          : null;
+      if (
+        !backupLatest ||
+        typeof backupLatest.sourceFile !== "string" ||
+        !sourceFileBelongsToAccount(backupLatest.sourceFile, account.username)
+      ) {
+        throw new Error(
+          `Este backup não pertence à conta @${account.username}. Troque de perfil antes de restaurá-lo.`,
+        );
+      }
+
       let restoredLatest: StoredAnalysis | null = null;
       let restoredProtected: ProtectedProfile[] = [];
       let restoredSettings = settings;
@@ -1288,7 +1364,9 @@ export function CleanupManager() {
           typeof record.id === "string" &&
           typeof record.createdAt === "string" &&
           typeof record.sourceFile === "string" &&
-          record.analysis
+          record.analysis &&
+          account &&
+          sourceFileBelongsToAccount(record.sourceFile, account.username)
         ) {
           await restoreAnalysisSnapshot(record);
           restoredLatest = record;
@@ -1468,6 +1546,10 @@ export function CleanupManager() {
   }
 
   async function uploadLocalProgressToCloud() {
+    if (!account || (latest && !sourceFileBelongsToAccount(latest.sourceFile, account.username))) {
+      setCloudNote("Sincronização bloqueada: os dados locais não pertencem à conta conectada.");
+      return false;
+    }
     if (!cloudConfigured) {
       setCloudNote("A nuvem ainda não está disponível nesta sessão.");
       return false;
@@ -1854,8 +1936,9 @@ export function CleanupManager() {
     </div>
   ) : null;
 
-  if (loading) return <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">Carregando regras locais...</div>;
-  if (!latest) return <><div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2><p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">O botão Restaurar backup abre um campo grande para você colar manualmente o código completo.</p></div>{restoreBackupDialog}</>;
+  if (accountError) return <div className="rounded-[2rem] border border-amber-200 bg-amber-50 p-6 text-sm text-amber-950 shadow-sm">{accountError} <Link href="/conectar" className="font-black underline">Conectar Instagram</Link></div>;
+  if (loading || accountLoading || !account) return <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">Verificando a conta conectada e carregando seus dados...</div>;
+  if (!latest) return <><div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><p className="text-sm font-black text-blue-700">Conta ativa: @{account.username}</p><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2>{migration === "not_owned" || migration === "partial" ? <p className="mx-auto mt-2 max-w-xl text-sm font-semibold leading-6 text-amber-700">Há dados antigos de outra conta preservados neste dispositivo, mas eles não foram carregados neste perfil.</p> : null}<p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">O botão Restaurar backup abre um campo grande para você colar manualmente o código completo.</p></div>{restoreBackupDialog}</>;
 
   const activeList =
     tab === "priority"
@@ -1869,6 +1952,7 @@ export function CleanupManager() {
   return (
     <>
     <div className="space-y-3 sm:space-y-6">
+      <p className="text-sm font-black text-blue-700">Conta ativa: @{account.username}</p>
       <section className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-6">
         <div className="rounded-2xl border border-red-200 bg-red-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-red-700">Prioridade</p><p className="mt-2 text-3xl font-black text-red-950">{priority.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-red-600/70">Não segue + até {settings.maxFollowers.toLocaleString("pt-BR")} seguidores</p></div>
         <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-amber-700">Revisar</p><p className="mt-2 text-3xl font-black text-amber-950">{review.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-amber-700/70">Contagem ainda desconhecida</p></div>
