@@ -131,9 +131,11 @@ export function CleanupManager() {
     if (!account) return;
     const rawSnapshot = state?.snapshot as Record<string, unknown> | null | undefined;
     if (
-      rawSnapshot?.source_file &&
-      typeof rawSnapshot.source_file === "string" &&
-      !sourceFileBelongsToAccount(rawSnapshot.source_file, account.username)
+      rawSnapshot?.analysis &&
+      (
+        typeof rawSnapshot.source_file !== "string" ||
+        !sourceFileBelongsToAccount(rawSnapshot.source_file, account.username)
+      )
     ) {
       setCloudNote("Checkpoint de outra conta ignorado. Os dados locais desta conta permanecem separados.");
       return;
@@ -469,6 +471,20 @@ export function CleanupManager() {
 
         if (data.snapshot && typeof data.snapshot === "object") {
           const snapshot = data.snapshot as Record<string, unknown>;
+          const snapshotLatest =
+            snapshot.latest && typeof snapshot.latest === "object"
+              ? snapshot.latest as StoredAnalysis
+              : null;
+          if (
+            !snapshotLatest ||
+            typeof snapshotLatest.sourceFile !== "string" ||
+            !sourceFileBelongsToAccount(snapshotLatest.sourceFile, account.username)
+          ) {
+            setExtensionNote(
+              `Dados do aplicativo pertencentes a outra conta foram ignorados. Conta ativa: @${account.username}.`,
+            );
+            return;
+          }
 
           if (snapshot.latest && typeof snapshot.latest === "object") {
             const record = snapshot.latest as StoredAnalysis;
@@ -1317,6 +1333,20 @@ export function CleanupManager() {
       }
 
       if (!account) throw new Error("Conecte o Instagram antes de restaurar um backup.");
+      const backupLatest =
+        backup.latest && typeof backup.latest === "object"
+          ? backup.latest as StoredAnalysis
+          : null;
+      if (
+        !backupLatest ||
+        typeof backupLatest.sourceFile !== "string" ||
+        !sourceFileBelongsToAccount(backupLatest.sourceFile, account.username)
+      ) {
+        throw new Error(
+          `Este backup não pertence à conta @${account.username}. Troque de perfil antes de restaurá-lo.`,
+        );
+      }
+
       let restoredLatest: StoredAnalysis | null = null;
       let restoredProtected: ProtectedProfile[] = [];
       let restoredSettings = settings;
@@ -1901,8 +1931,9 @@ export function CleanupManager() {
     </div>
   ) : null;
 
-  if (loading) return <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">Carregando regras locais...</div>;
-  if (!latest) return <><div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2><p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">O botão Restaurar backup abre um campo grande para você colar manualmente o código completo.</p></div>{restoreBackupDialog}</>;
+  if (accountError) return <div className="rounded-[2rem] border border-amber-200 bg-amber-50 p-6 text-sm text-amber-950 shadow-sm">{accountError} <Link href="/conectar" className="font-black underline">Conectar Instagram</Link></div>;
+  if (loading || accountLoading || !account) return <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">Verificando a conta conectada e carregando seus dados...</div>;
+  if (!latest) return <><div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><p className="text-sm font-black text-blue-700">Conta ativa: @{account.username}</p><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2>{migration === "not_owned" || migration === "partial" ? <p className="mx-auto mt-2 max-w-xl text-sm font-semibold leading-6 text-amber-700">Há dados antigos de outra conta preservados neste dispositivo, mas eles não foram carregados neste perfil.</p> : null}<p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">O botão Restaurar backup abre um campo grande para você colar manualmente o código completo.</p></div>{restoreBackupDialog}</>;
 
   const activeList =
     tab === "priority"
@@ -1916,6 +1947,7 @@ export function CleanupManager() {
   return (
     <>
     <div className="space-y-3 sm:space-y-6">
+      <p className="text-sm font-black text-blue-700">Conta ativa: @{account.username}</p>
       <section className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-6">
         <div className="rounded-2xl border border-red-200 bg-red-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-red-700">Prioridade</p><p className="mt-2 text-3xl font-black text-red-950">{priority.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-red-600/70">Não segue + até {settings.maxFollowers.toLocaleString("pt-BR")} seguidores</p></div>
         <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-3 shadow-sm sm:p-5"><p className="text-sm font-semibold text-amber-700">Revisar</p><p className="mt-2 text-3xl font-black text-amber-950">{review.length.toLocaleString("pt-BR")}</p><p className="mt-1 text-xs text-amber-700/70">Contagem ainda desconhecida</p></div>
