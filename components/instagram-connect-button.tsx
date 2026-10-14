@@ -10,10 +10,11 @@ declare global {
   }
 }
 
-export function InstagramConnectButton() {
+export function InstagramConnectButton({ officialEnabled = true }: { officialEnabled?: boolean }) {
   const [personalOpen, setPersonalOpen] = useState(false);
 
   function connect() {
+    if (!officialEnabled) return;
     const bridge = window.FollowCleanAndroid;
     if (bridge?.postMessage) {
       bridge.postMessage(JSON.stringify({ type: "START_OAUTH" }));
@@ -28,9 +29,10 @@ export function InstagramConnectButton() {
       <button
         type="button"
         onClick={connect}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-black text-white"
+        disabled={!officialEnabled}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300"
       >
-        Conectar conta profissional
+        {officialEnabled ? "Conectar conta profissional" : "Conta profissional indisponível"}
       </button>
 
       <button
@@ -51,7 +53,7 @@ export function InstagramConnectButton() {
             Usuário da conta pessoal
           </label>
           <p className="mt-1 text-xs leading-5 text-slate-500">
-            Não é necessário transformar a conta em profissional. O FollowClean usará o nome apenas para separar o histórico deste perfil neste dispositivo. A análise continua baseada na exportação oficial do Instagram.
+            Não é necessário transformar a conta em profissional. O FollowClean usa o nome apenas para separar o histórico deste perfil neste dispositivo; a análise continua baseada na exportação oficial do Instagram.
           </p>
           <div className="mt-3 flex gap-2">
             <div className="flex min-h-11 flex-1 items-center rounded-xl border border-slate-200 bg-slate-50 px-3">
