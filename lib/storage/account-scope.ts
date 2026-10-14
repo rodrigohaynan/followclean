@@ -9,6 +9,8 @@ import {
 export type ActiveInstagramAccount = {
   id: string;
   username: string;
+  mode: "official" | "personal";
+  cloudEnabled: boolean;
 };
 
 export function useActiveInstagramAccount() {
@@ -24,11 +26,11 @@ export function useActiveInstagramAccount() {
 
     void (async () => {
       try {
-        const response = await fetch("/api/cleanup/cloud/token", {
+        const response = await fetch("/api/instagram/account", {
           cache: "no-store",
         });
         if (!response.ok) {
-          throw new Error("Conecte o Instagram para acessar os dados desta conta.");
+          throw new Error("Selecione ou conecte uma conta do Instagram para acessar os dados.");
         }
 
         const data = await response.json();
@@ -37,12 +39,14 @@ export function useActiveInstagramAccount() {
           .trim()
           .toLowerCase()
           .replace(/^@/, "");
+        const mode = data?.mode === "personal" ? "personal" : "official";
+        const cloudEnabled = Boolean(data?.cloudEnabled && mode === "official");
 
         if (
           !/^[a-zA-Z0-9_-]{1,100}$/.test(id) ||
           !/^[a-z0-9._]{1,30}$/.test(username)
         ) {
-          throw new Error("Não foi possível identificar a conta conectada.");
+          throw new Error("Não foi possível identificar a conta selecionada.");
         }
 
         setStorageAccount(id, username);
@@ -50,13 +54,13 @@ export function useActiveInstagramAccount() {
         if (cancelled) return;
 
         setMigration(migrationResult);
-        setAccount({ id, username });
+        setAccount({ id, username, mode, cloudEnabled });
       } catch (reason) {
         if (!cancelled) {
           setError(
             reason instanceof Error
               ? reason.message
-              : "Não foi possível verificar a conta conectada.",
+              : "Não foi possível verificar a conta selecionada.",
           );
         }
       } finally {

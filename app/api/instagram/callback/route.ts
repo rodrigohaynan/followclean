@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sealInstagramSession } from "@/lib/instagram/session";
+import { LOCAL_PROFILE_COOKIE } from "@/lib/instagram/local-profile";
 import {
   verifyAndroidBrowserOAuthState,
   verifyAndroidOAuthState,
@@ -229,6 +230,7 @@ export async function GET(request: NextRequest) {
 
     const response = NextResponse.redirect(new URL("/conectar?status=connected", request.url));
     response.cookies.delete(OAUTH_STATE_COOKIE);
+    response.cookies.delete(LOCAL_PROFILE_COOKIE);
     response.cookies.set(SESSION_COOKIE, sealed, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
