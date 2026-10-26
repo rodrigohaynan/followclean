@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AppInstallPrompt } from "@/components/app-install-prompt";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,7 +15,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR">
-      <body>{children}</body>
+      <body>
+        {children}
+        <AppInstallPrompt />
+      </body>
     </html>
   );
 }
