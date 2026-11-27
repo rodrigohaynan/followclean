@@ -57,6 +57,17 @@ export async function ensureCloudSchema() {
   schemaReady = (async () => {
     const sql = getCloudSql();
 
+    // Trava de execução: garante que apenas um dispositivo processe a fila
+    // de uma conta por vez (usada por /claim e /release).
+    await sql`
+      CREATE TABLE IF NOT EXISTS followclean_run_lock (
+        owner_id TEXT PRIMARY KEY,
+        active_device_id TEXT NOT NULL,
+        lease_until TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+
     await sql`
       CREATE TABLE IF NOT EXISTS followclean_cleanup_queue (
         owner_id TEXT NOT NULL,
@@ -143,7 +154,27 @@ export async function ensureCloudSchema() {
       CREATE INDEX IF NOT EXISTS followclean_cleanup_snapshot_updated_idx
       ON followclean_cleanup_snapshot (updated_at DESC)
     `;
-  })();
+  })().catch((error) => {
+    // Sem isso, uma falha temporária (rede/cold start do Neon) ficaria em
+    // cache até a função reiniciar e todas as rotas de nuvem falhariam.
+    schemaReady = null;
+    throw error;
+  });
 
   return schemaReady;
+}
+
+/**
+ * Remove todos os dados em nuvem de uma conta (fila, checkpoint, dispositivos
+ * e trava). Usado pelos callbacks de exclusão de dados e desautorização da Meta.
+ */
+export async function deleteCloudDataForOwner(ownerId: string) {
+  if (!cloudDatabaseConfigured() || !ownerId) return false;
+  await ensureCloudSchema();
+  const sql = getCloudSql();
+  await sql`DELETE FROM followclean_cleanup_queue WHERE owner_id = ${ownerId}`;
+  await sql`DELETE FROM followclean_cleanup_snapshot WHERE owner_id = ${ownerId}`;
+  await sql`DELETE FROM followclean_devices WHERE owner_id = ${ownerId}`;
+  await sql`DELETE FROM followclean_run_lock WHERE owner_id = ${ownerId}`;
+  return true;
 }

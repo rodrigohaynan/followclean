@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyMetaSignedRequest } from "@/lib/instagram/signed-request";
+import { deleteCloudDataForOwner } from "@/lib/cloud/database";
 
 export const runtime = "nodejs";
 
@@ -30,7 +31,12 @@ export async function POST(request: Request) {
     );
   }
 
-  // O FollowClean ainda é local-first e não mantém dados da conta em servidor.
-  // Se futuramente houver dados persistidos em nuvem, a remoção por user_id deve ocorrer aqui.
+  // Ao remover o acesso do app, o checkpoint em nuvem da conta deixa de ter
+  // utilidade e é apagado. Os dados locais continuam no dispositivo do usuário.
+  try {
+    await deleteCloudDataForOwner(String(payload.user_id));
+  } catch (error) {
+    console.error("[Meta] deauthorize_cloud_error", error);
+  }
   return NextResponse.json({ ok: true });
 }

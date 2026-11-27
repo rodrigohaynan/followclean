@@ -10,7 +10,7 @@ export default async function AndroidAppLinkPage({
 
   if (!handoff) {
     return (
-      <main className="min-h-screen px-6 py-16">
+      <main className="px-6 py-16">
         <section className="mx-auto max-w-xl rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
           <h1 className="text-2xl font-black text-slate-950">
             Retorno do FollowClean inválido

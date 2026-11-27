@@ -1,24 +1,11 @@
-import Link from "next/link";
-import { ArrowLeft, Camera, HardDrive, House, ShieldCheck, UsersRound } from "lucide-react";
+import { HardDrive } from "lucide-react";
 import { Dashboard } from "@/components/dashboard";
+import { SiteHeader } from "@/components/site-header";
 
 export default function DashboardPage() {
   return (
-    <main className="min-h-screen pb-8 sm:pb-16">
-      <header className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:flex-nowrap sm:px-6 sm:py-6">
-        <Link href="/" className="flex min-w-0 items-center gap-2.5 sm:gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm sm:h-10 sm:w-10 sm:rounded-2xl"><UsersRound size={21} /></div>
-          <div className="min-w-0">
-            <p className="text-base font-black tracking-tight sm:text-lg">FollowClean</p>
-            <p className="text-[11px] text-slate-500 sm:text-xs">Dashboard local</p>
-          </div>
-        </Link>
-        <nav aria-label="Navegação do painel" className="flex shrink-0 items-center gap-2">
-          <Link href="/conectar" className="hidden min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm md:inline-flex"><Camera size={16} /> Instagram</Link>
-          <Link href="/limpeza" aria-label="Abrir limpeza" title="Limpeza" className="inline-flex h-10 w-10 items-center justify-center gap-2 rounded-xl fc-dark-action bg-slate-950 text-sm font-semibold text-white shadow-sm sm:w-auto sm:px-4"><ShieldCheck size={17} /><span className="hidden sm:inline">Limpeza</span></Link>
-          <Link href="/" aria-label="Voltar ao início" title="Início" className="inline-flex h-10 w-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold shadow-sm sm:w-auto sm:px-4"><House size={17} className="sm:hidden" /><ArrowLeft size={16} className="hidden sm:block" /><span className="hidden sm:inline">Início</span></Link>
-        </nav>
-      </header>
+    <main>
+      <SiteHeader subtitle="Painel local" />
       <section className="mx-auto max-w-6xl px-4 pt-4 sm:px-6 sm:pt-8">
         <div className="mb-4 flex flex-col gap-3 sm:mb-8 sm:gap-4 md:flex-row md:items-end md:justify-between">
           <div className="min-w-0">

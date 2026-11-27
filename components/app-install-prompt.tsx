@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Smartphone, X } from "lucide-react";
 
@@ -15,30 +16,49 @@ declare global {
   }
 }
 
+// Telas onde o aviso atrapalharia: a própria instalação e os retornos do login.
+const HIDDEN_PATHS = ["/instalar", "/conectar/android-retorno", "/app/oauth", "/exclusao-dados"];
+
+function readDismissedAt() {
+  try {
+    return Number(localStorage.getItem(DISMISSED_KEY) || 0);
+  } catch {
+    return 0;
+  }
+}
+
 export function AppInstallPrompt() {
   const [visible, setVisible] = useState(false);
+  const pathname = usePathname() ?? "";
+  const hiddenHere = HIDDEN_PATHS.some((path) => pathname.startsWith(path));
 
   useEffect(() => {
+    if (hiddenHere) return;
     const userAgent = navigator.userAgent || "";
     const insideFollowClean =
       /FollowCleanAndroid/i.test(userAgent) ||
       Boolean(window.FollowCleanAndroid?.postMessage);
 
-    if (insideFollowClean) return;
+    // O app existe só para Android: não faz sentido oferecer no iPhone ou no computador.
+    if (insideFollowClean || !/Android/i.test(userAgent)) return;
 
-    const dismissedAt = Number(localStorage.getItem(DISMISSED_KEY) || 0);
+    const dismissedAt = readDismissedAt();
     if (dismissedAt && Date.now() - dismissedAt < DISMISS_FOR_MS) return;
 
     const timer = window.setTimeout(() => setVisible(true), 700);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [hiddenHere]);
 
   function dismiss() {
-    localStorage.setItem(DISMISSED_KEY, String(Date.now()));
+    try {
+      localStorage.setItem(DISMISSED_KEY, String(Date.now()));
+    } catch {
+      // Armazenamento bloqueado (modo privado): apenas esconde nesta visita.
+    }
     setVisible(false);
   }
 
-  if (!visible) return null;
+  if (!visible || hiddenHere) return null;
 
   return (
     <div className="fixed inset-x-3 bottom-3 z-[100] mx-auto max-w-lg sm:bottom-5" role="dialog" aria-label="Instalar aplicativo FollowClean">

@@ -1,14 +1,12 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import {
-  ArrowLeft,
   Camera,
   CheckCircle2,
   HardDrive,
   LockKeyhole,
   ShieldCheck,
   Unplug,
-  UsersRound,
 } from "lucide-react";
 import { unsealInstagramSession } from "@/lib/instagram/session";
 import {
@@ -16,6 +14,7 @@ import {
   readLocalProfileToken,
 } from "@/lib/instagram/local-profile";
 import { InstagramConnectButton } from "@/components/instagram-connect-button";
+import { SiteHeader } from "@/components/site-header";
 
 const statusMessages: Record<string, { tone: string; text: string }> = {
   connected: { tone: "border-emerald-200 bg-emerald-50 text-emerald-900", text: "Conta profissional conectada com sucesso pela Meta." },
@@ -76,28 +75,8 @@ export default async function ConectarPage({
       : null;
 
   return (
-    <main className="min-h-screen pb-8 sm:pb-16">
-      <header className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:flex-nowrap sm:px-6 sm:py-6">
-        <Link href="/" className="flex min-w-0 items-center gap-2.5 sm:gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm sm:h-10 sm:w-10">
-            <UsersRound size={21} />
-          </div>
-          <div>
-            <p className="text-base font-black tracking-tight sm:text-lg">FollowClean</p>
-            <p className="text-[11px] text-slate-500 sm:text-xs">Contas pessoais e profissionais</p>
-          </div>
-        </Link>
-        <div className="flex items-center gap-2">
-          {active ? (
-            <Link href="/limpeza" className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-slate-950 px-3 py-2 text-sm font-semibold text-white shadow-sm sm:px-4">
-              <ShieldCheck size={16} /> Limpeza
-            </Link>
-          ) : null}
-          <Link href="/dashboard" className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm sm:px-4">
-            <ArrowLeft size={16} /> Dashboard
-          </Link>
-        </div>
-      </header>
+    <main>
+      <SiteHeader subtitle="Contas pessoais e profissionais" />
 
       <section className="mx-auto max-w-5xl px-4 pt-4 sm:px-6 sm:pt-8">
         <div className="mb-4 sm:mb-8">
@@ -146,7 +125,7 @@ export default async function ConectarPage({
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
-                <Link href="/limpeza" className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-black text-white">
+                <Link href="/limpeza" className="inline-flex items-center gap-2 rounded-xl fc-dark-action bg-slate-950 px-4 py-3 text-sm font-black text-white">
                   <ShieldCheck size={17} /> Ir para Limpeza
                 </Link>
                 <form action="/api/instagram/disconnect" method="post">

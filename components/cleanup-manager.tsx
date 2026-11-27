@@ -994,7 +994,9 @@ export function CleanupManager() {
         setCloudNote(
           configured
             ? "Checkpoint em nuvem ativo. O progresso pode continuar em outro computador."
-            : "Código de nuvem pronto; falta conectar o banco Neon.",
+            : tokenData?.mode === "personal"
+              ? "Contas pessoais usam o modo local. Para levar o progresso a outro aparelho, use o backup em arquivo."
+              : "A continuidade entre dispositivos ainda não está disponível. O progresso fica salvo neste dispositivo.",
         );
 
         window.postMessage(
@@ -1051,7 +1053,9 @@ export function CleanupManager() {
           setCloudNote("O progresso local continua salvo, mas a sincronização em nuvem falhou temporariamente.");
         }
       })();
-    }, 1200);
+      // Envia o snapshot completo no máximo a cada poucos segundos durante
+      // uma verificação em lote, em vez de a cada perfil lido.
+    }, 5000);
 
     return () => window.clearTimeout(timer);
   }, [
@@ -1474,6 +1478,7 @@ export function CleanupManager() {
           JSON.stringify({
             type: "SAVE_SNAPSHOT",
             snapshot: {
+              accountUsername: account.username,
               latest: restoredLatest,
               protectedProfiles: restoredProtected,
               settings: restoredSettings,
@@ -1752,6 +1757,7 @@ export function CleanupManager() {
             type: "SET_CLOUD_AUTH",
             configured: true,
             token: cloudToken,
+            accountUsername: account?.username ?? null,
           },
           "*",
         );
@@ -1938,7 +1944,7 @@ export function CleanupManager() {
 
   if (accountError) return <div className="rounded-[2rem] border border-amber-200 bg-amber-50 p-6 text-sm text-amber-950 shadow-sm">{accountError} <Link href="/conectar" className="font-black underline">Conectar Instagram</Link></div>;
   if (loading || accountLoading || !account) return <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">Verificando a conta conectada e carregando seus dados...</div>;
-  if (!latest) return <><div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><p className="text-sm font-black text-blue-700">Conta ativa: @{account.username}</p><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2>{migration === "not_owned" || migration === "partial" ? <p className="mx-auto mt-2 max-w-xl text-sm font-semibold leading-6 text-amber-700">Há dados antigos de outra conta preservados neste dispositivo, mas eles não foram carregados neste perfil.</p> : null}<p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">O botão Restaurar backup abre um campo grande para você colar manualmente o código completo.</p></div>{restoreBackupDialog}</>;
+  if (!latest) return <><div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><UserMinus className="mx-auto text-slate-300" size={42} /><p className="text-sm font-black text-blue-700">Conta ativa: @{account.username}</p><h2 className="mt-4 text-xl font-black text-slate-950">Restaurar progresso ou importar dados</h2>{migration === "not_owned" || migration === "partial" ? <p className="mx-auto mt-2 max-w-xl text-sm font-semibold leading-6 text-amber-700">Há dados antigos de outra conta preservados neste dispositivo, mas eles não foram carregados neste perfil.</p> : null}<p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{extensionNote}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => void restorePortableBackup()} className="inline-flex items-center gap-2 rounded-xl fc-dark-action bg-slate-950 px-5 py-3 font-bold text-white">Restaurar backup</button><Link href="/importar" className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Importar dados do Instagram</Link></div><p className="mx-auto mt-4 max-w-xl text-xs leading-5 text-slate-400">O botão Restaurar backup abre um campo grande para você colar manualmente o código completo.</p></div>{restoreBackupDialog}</>;
 
   const activeList =
     tab === "priority"
@@ -1970,7 +1976,7 @@ export function CleanupManager() {
             <button type="button" onClick={toggleRule} className={`inline-flex min-w-36 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition ${settings.notFollowingBack ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"}`}><CheckCircle2 size={17} /> {settings.notFollowingBack ? "Ativada" : "Desativada"}</button>
           </div>
         </div>
-        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-sm leading-6 sm:mt-5 sm:p-4 text-blue-950 sm:flex-row sm:items-center sm:justify-between"><span>A regra já entende a contagem de seguidores. A conexão oficial da Meta valida sua conta; a extensão assistida enriquece os perfis da fila.</span><Link href="/conectar" className="inline-flex shrink-0 items-center gap-2 font-black text-blue-700"><Instagram size={16} /> Instagram conectado</Link></div>
+        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-sm leading-6 sm:mt-5 sm:p-4 text-blue-950 sm:flex-row sm:items-center sm:justify-between"><span>A regra já entende a contagem de seguidores. A conexão oficial da Meta valida sua conta; a extensão assistida enriquece os perfis da fila.</span><Link href="/conectar" className="inline-flex shrink-0 items-center gap-2 font-black text-blue-700"><Instagram size={16} /> {account.mode === "personal" ? "Conta pessoal · modo local" : "Conta conectada"}</Link></div>
         <div className="mt-3 grid gap-3 lg:grid-cols-3">
           <div className={`rounded-2xl border p-4 text-sm ${extensionReady || androidReady ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
             <div className="font-black">{androidReady ? "FollowClean Android · scanner nativo" : "FollowClean Assist · navegador"}</div>
@@ -2055,7 +2061,7 @@ export function CleanupManager() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-[2rem] sm:p-6"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2 font-black text-slate-950"><ShieldCheck size={19} className="text-emerald-600" /> Lista protegida</div><p className="mt-1 text-sm text-slate-500">Adicione família, amigos, clientes, parceiros ou qualquer conta estratégica.</p></div><form className="flex w-full gap-2 lg:max-w-md" onSubmit={(event) => { event.preventDefault(); if (newProtected.trim()) addProtected(newProtected); }}><input value={newProtected} onChange={(event) => setNewProtected(event.target.value)} placeholder="@usuario" className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-blue-400 focus:bg-white" /><button type="submit" className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white"><Plus size={16} /> Proteger</button></form></div></section>
+      <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-[2rem] sm:p-6"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2 font-black text-slate-950"><ShieldCheck size={19} className="text-emerald-600" /> Lista protegida</div><p className="mt-1 text-sm text-slate-500">Adicione família, amigos, clientes, parceiros ou qualquer conta estratégica.</p></div><form className="flex w-full gap-2 lg:max-w-md" onSubmit={(event) => { event.preventDefault(); if (newProtected.trim()) addProtected(newProtected); }}><input value={newProtected} onChange={(event) => setNewProtected(event.target.value)} placeholder="@usuario" className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-blue-400 focus:bg-white" /><button type="submit" className="inline-flex shrink-0 items-center gap-2 rounded-xl fc-dark-action bg-slate-950 px-4 py-2.5 text-sm font-bold text-white"><Plus size={16} /> Proteger</button></form></div></section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:rounded-[2rem]">
         <div className="border-b border-slate-200 p-3 sm:p-6">

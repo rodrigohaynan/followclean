@@ -93,3 +93,22 @@ jobs:
           name: FollowClean-Android-release
           path: android-app/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+
+      # Publica o APK em um release fixo para que /instalar tenha um link
+      # direto e público (artifacts do Actions exigem login no GitHub).
+      - name: Publish APK to GitHub Release
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="android-latest"
+          APK="$RUNNER_TEMP/FollowClean.apk"
+          cp android-app/app/build/outputs/apk/release/app-release.apk "$APK"
+          gh release delete "$TAG" --yes --cleanup-tag || true
+          gh release create "$TAG" "$APK" \
+            --target "$GITHUB_SHA" \
+            --title "FollowClean Android" \
+            --notes "APK assinado gerado automaticamente a partir de ${GITHUB_SHA::7}. Instale por cima da versão anterior para manter os dados do app." \
+            --latest
