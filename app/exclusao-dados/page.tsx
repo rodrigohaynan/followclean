@@ -33,7 +33,7 @@ export default async function ExclusaoDadosPage({
             Exclusão de dados
           </h1>
           <p className="mt-4 text-sm leading-7 text-slate-600 sm:text-base">
-            Análises, listas protegidas e regras ficam salvas no navegador ou no app do próprio usuário. O único dado guardado em servidor é o checkpoint em nuvem opcional das contas profissionais.
+            Análises, listas protegidas e regras ficam salvas no navegador ou no app do próprio usuário. O único dado guardado em servidor é o checkpoint em nuvem das contas profissionais (listas da análise, fila de verificação, protegidos e regras).
           </p>
 
           {code ? (
