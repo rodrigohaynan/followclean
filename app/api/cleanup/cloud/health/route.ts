@@ -5,6 +5,10 @@ import {
   getCloudSql,
 } from "@/lib/cloud/database";
 
+// Precisa rodar a cada acesso: se for gerada no build, a resposta congela o
+// estado das variáveis de ambiente daquele momento.
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const configured = cloudDatabaseConfigured();
   if (!configured) {
