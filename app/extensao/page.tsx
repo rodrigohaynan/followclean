@@ -1,54 +1,37 @@
 import Link from "next/link";
 import {
-  ArrowLeft,
   Download,
-  ExternalLink,
+  ArrowRight,
   Monitor,
   Puzzle,
   ShieldCheck,
   Smartphone,
-  UsersRound,
 } from "lucide-react";
+import { SiteHeader } from "@/components/site-header";
 
 export default function ExtensaoPage() {
   return (
-    <main className="min-h-screen pb-16">
-      <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-6">
-        <Link href="/" className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm">
-            <UsersRound size={21} />
-          </div>
-          <div>
-            <p className="text-lg font-black tracking-tight">FollowClean</p>
-            <p className="text-xs text-slate-500">FollowClean Assist</p>
-          </div>
-        </Link>
-        <Link
-          href="/limpeza"
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm"
-        >
-          <ArrowLeft size={16} /> Limpeza
-        </Link>
-      </header>
+    <main>
+      <SiteHeader subtitle="FollowClean Assist" />
 
-      <section className="mx-auto max-w-5xl px-6 pt-8">
-        <div className="mb-8">
-          <p className="text-sm font-bold uppercase tracking-[0.16em] text-blue-600">
+      <section className="mx-auto max-w-5xl px-4 pt-6 sm:px-6 sm:pt-10">
+        <div className="mb-6 sm:mb-8">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600 sm:text-sm">
             Extensão assistida
           </p>
-          <h1 className="mt-2 text-4xl font-black tracking-[-0.035em] text-slate-950">
+          <h1 className="mt-2 text-[clamp(1.6rem,6vw,2.25rem)] font-black leading-tight tracking-[-0.035em] text-slate-950 sm:text-4xl">
             Enriquecer a fila pelo Instagram
           </h1>
-          <p className="mt-3 max-w-3xl leading-7 text-slate-600">
-            A extensão pode trabalhar em modo contínuo: abre os perfis pendentes
-            um por vez, captura a quantidade de seguidores exibida e salva o
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600 sm:text-base sm:leading-7">
+            A extensão trabalha em modo contínuo: abre os perfis pendentes um
+            por vez, captura a quantidade de seguidores exibida e salva o
             progresso. Com a nuvem ativada, outro computador pode continuar a
             mesma fila. O unfollow continua sendo uma decisão sua.
           </p>
         </div>
 
         <section className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:rounded-[2rem] sm:p-6">
             <div className="flex items-center gap-3">
               <div className="rounded-2xl bg-blue-50 p-3 text-blue-600">
                 <Puzzle size={24} />
@@ -59,14 +42,20 @@ export default function ExtensaoPage() {
               </div>
             </div>
 
-            <ol className="mt-5 space-y-3 text-sm leading-6 text-slate-700">
-              <li><strong>1.</strong> Se a extensão já está instalada, <strong>não remova</strong>. Isso ajuda a preservar os resultados locais já capturados.</li>
-              <li><strong>2.</strong> Baixe o projeto atualizado e extraia o ZIP.</li>
-              <li><strong>3.</strong> Copie os arquivos da nova pasta <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">extension</code> sobre a <strong>mesma pasta</strong> usada pela extensão atual.</li>
-              <li><strong>4.</strong> Abra <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">chrome://extensions</code> e clique em <strong>Recarregar</strong> no FollowClean Assist.</li>
-              <li><strong>5.</strong> Confirme que aparece a versão <strong>0.4.1</strong> e que não há erros.</li>
-              <li><strong>6.</strong> Volte à página Limpeza e clique em <strong>Sincronizar</strong> antes de iniciar a verificação contínua.</li>
-              <li><strong>7.</strong> Para deixar durante a madrugada, mantenha o Chrome e o computador ligados; a extensão salva checkpoints e retoma após reinicialização do Chrome.</li>
+            <h3 className="mt-5 text-sm font-black text-slate-950">Primeira instalação</h3>
+            <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-6 text-slate-700">
+              <li>Baixe o projeto e extraia o ZIP em uma pasta fixa do computador.</li>
+              <li>Abra <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">chrome://extensions</code> e ative o <strong>Modo do desenvolvedor</strong>.</li>
+              <li>Clique em <strong>Carregar sem compactação</strong> e escolha a pasta <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">extension</code>.</li>
+              <li>Volte à página Limpeza: a extensão aparece como detectada.</li>
+            </ol>
+
+            <h3 className="mt-5 text-sm font-black text-slate-950">Atualizar sem perder o progresso</h3>
+            <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-6 text-slate-700">
+              <li><strong>Não remova</strong> a extensão instalada: os resultados capturados ficam nela.</li>
+              <li>Copie os arquivos da nova pasta <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">extension</code> sobre a <strong>mesma pasta</strong> usada hoje.</li>
+              <li>Em <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">chrome://extensions</code>, clique em <strong>Recarregar</strong> e confira a versão.</li>
+              <li>Na Limpeza, clique em <strong>Sincronizar</strong> antes de iniciar a verificação contínua.</li>
             </ol>
 
             <a
@@ -79,49 +68,56 @@ export default function ExtensaoPage() {
             </a>
           </div>
 
-          <div className="rounded-[2rem] border border-amber-200 bg-amber-50 p-6">
+          <div className="flex flex-col rounded-2xl border border-blue-200 bg-blue-50 p-5 sm:rounded-[2rem] sm:p-6">
             <div className="flex items-center gap-3">
-              <div className="rounded-2xl bg-white p-3 text-amber-700 shadow-sm">
+              <div className="rounded-2xl bg-white p-3 text-blue-700 shadow-sm">
                 <Smartphone size={24} />
               </div>
               <div>
-                <h2 className="font-black text-amber-950">Android</h2>
-                <p className="text-sm text-amber-800">Chrome móvel não instala extensões</p>
+                <h2 className="font-black text-blue-950">No celular Android</h2>
+                <p className="text-sm text-blue-800">O Chrome móvel não instala extensões</p>
               </div>
             </div>
-            <p className="mt-5 text-sm leading-6 text-amber-950">
-              No celular, use o modo assistido já disponível na fila: abra o
-              perfil pelo FollowClean, veja a quantidade de seguidores no
-              Instagram e toque em <strong>Informar seguidores</strong>. A regra
-              de até 2.000 seguidores é aplicada imediatamente.
+            <p className="mt-5 text-sm leading-6 text-blue-950">
+              Use o <strong>app FollowClean para Android</strong>: ele tem um
+              scanner próprio que lê a contagem pública dos perfis da fila e
+              salva o progresso no aparelho. Sem o app, você ainda pode abrir o
+              perfil e tocar em <strong>Informar seguidores</strong> na fila.
             </p>
+            <Link
+              href="/instalar"
+              className="mt-5 inline-flex w-fit items-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-black text-white"
+            >
+              <Smartphone size={17} /> Instalar app Android
+            </Link>
           </div>
         </section>
 
-        <section className="mt-5 rounded-[2rem] border border-emerald-200 bg-emerald-50 p-6">
+        <section className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 sm:mt-5 sm:rounded-[2rem] sm:p-6">
           <div className="flex items-start gap-3">
             <ShieldCheck className="mt-0.5 shrink-0 text-emerald-700" size={22} />
             <div>
               <h2 className="font-black text-emerald-950">Como a revisão funciona</h2>
               <p className="mt-2 text-sm leading-6 text-emerald-900">
-                O FollowClean envia apenas os usuários que não seguem você de
-                volta e ainda estão sem contagem conhecida. A extensão abre um
-                perfil por vez e registra a contagem visível. A execução não
-                para mais em lotes fixos de 50. Se o Instagram solicitar login,
-                checkpoint ou verificação, a extensão pausa automaticamente.
-                Com o checkpoint em nuvem ativo, a fila e o progresso ficam
-                disponíveis para continuação em outro computador.
+                O FollowClean envia à extensão apenas os usuários que não seguem
+                você de volta e ainda estão sem contagem conhecida. Ela abre um
+                perfil por vez e registra a contagem visível. Se o Instagram
+                pedir login, checkpoint ou verificação, a extensão pausa
+                automaticamente — nada é feito para contornar limites da
+                plataforma. Para deixar rodando por horas, mantenha o Chrome e
+                o computador ligados: a extensão salva checkpoints e retoma
+                após reiniciar o navegador.
               </p>
             </div>
           </div>
         </section>
 
-        <section className="mt-5 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center gap-3">
-            <Monitor size={21} className="text-blue-600" />
+        <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:mt-5 sm:rounded-[2rem] sm:p-6">
+          <div className="flex items-start gap-3">
+            <Monitor size={21} className="mt-0.5 shrink-0 text-blue-600" />
             <div>
               <h2 className="font-black text-slate-950">Fluxo da extensão</h2>
-              <p className="mt-1 text-sm text-slate-500">
+              <p className="mt-1 text-sm leading-6 text-slate-500">
                 Limpeza → Iniciar verificação contínua → a extensão percorre a fila → checkpoints automáticos → sincronização no FollowClean.
               </p>
             </div>
@@ -130,7 +126,7 @@ export default function ExtensaoPage() {
             href="/limpeza"
             className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white"
           >
-            Ir para a fila <ExternalLink size={16} />
+            Ir para a fila <ArrowRight size={16} />
           </Link>
         </section>
       </section>

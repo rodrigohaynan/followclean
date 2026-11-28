@@ -27,7 +27,7 @@ export default async function AutorizarInstagramPage() {
 
   if (!state || !appId) {
     return (
-      <main className="min-h-screen px-6 py-16">
+      <main className="px-6 py-16">
         <section className="mx-auto max-w-xl rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
           <h1 className="text-2xl font-black text-slate-950">Sessão de conexão expirada</h1>
           <p className="mt-3 text-sm leading-6 text-slate-600">
@@ -45,7 +45,7 @@ export default async function AutorizarInstagramPage() {
   const chromeIntent = `${authUrl.replace(/^https:\/\//, "intent://")}#Intent;scheme=https;package=com.android.chrome;end`;
 
   return (
-    <main className="min-h-screen px-6 py-12">
+    <main className="px-6 py-12">
       <section className="mx-auto max-w-xl rounded-[2rem] border border-slate-200 bg-white p-7 shadow-sm md:p-9">
         <Link href="/conectar" className="inline-flex items-center gap-2 text-sm font-bold text-slate-500">
           <ArrowLeft size={16} /> Voltar

@@ -37,12 +37,13 @@ export async function readPendingAndroidSession(
   const sql = getCloudSql();
   const deviceKeyHash = hashAndroidDeviceKey(normalized);
 
+  // Uso único: a sessão pendente é removida ao ser resgatada, para que a
+  // mesma chave de dispositivo não possa reabrir a conta depois.
   const rows = await sql`
-    SELECT handoff
-    FROM followclean_android_pending_sessions
+    DELETE FROM followclean_android_pending_sessions
     WHERE device_key_hash = ${deviceKeyHash}
       AND expires_at > NOW()
-    LIMIT 1
+    RETURNING handoff
   `;
 
   const handoff = rows[0]?.handoff;

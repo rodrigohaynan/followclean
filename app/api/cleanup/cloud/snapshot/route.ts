@@ -231,7 +231,7 @@ export async function POST(request: NextRequest) {
         item.dataSource,
         item.updatedAt,
       );
-      return `(${base + 1}, ${base + 2}, ${base + 3}, 'verified', ${base + 4}, ${base + 5}, ${base + 6}, NULL, NULL, ${base + 7})`;
+      return `($${base + 1}, $${base + 2}, $${base + 3}, 'verified', $${base + 4}, $${base + 5}, $${base + 6}, NULL, NULL, $${base + 7})`;
     });
 
     await sql.query(
@@ -296,7 +296,7 @@ export async function POST(request: NextRequest) {
         item.reason,
         item.updatedAt,
       );
-      return `(${base + 1}, ${base + 2}, ${base + 3}, 'unavailable', ${base + 4}, NULL, ${base + 5})`;
+      return `($${base + 1}, $${base + 2}, $${base + 3}, 'unavailable', $${base + 4}, NULL, $${base + 5})`;
     });
 
     await sql.query(

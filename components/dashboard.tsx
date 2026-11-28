@@ -38,6 +38,7 @@ export function Dashboard() {
     setLoading(true);
     getAnalyses()
       .then(setHistory)
+      .catch(() => setHistory([]))
       .finally(() => setLoading(false));
   }, [account]);
 
@@ -202,7 +203,11 @@ export function Dashboard() {
               </div>
               <button
                 type="button"
-                onClick={() => removeSnapshot(item.id)}
+                onClick={() => {
+                  if (window.confirm("Excluir esta importação do histórico deste dispositivo?")) {
+                    void removeSnapshot(item.id);
+                  }
+                }}
                 className="rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
                 aria-label="Excluir snapshot"
               >
@@ -213,15 +218,21 @@ export function Dashboard() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-slate-950 p-4 text-white sm:rounded-[2rem] sm:p-6">
+      <Link
+        href="/limpeza"
+        className="group flex items-center justify-between gap-4 rounded-2xl fc-dark-action bg-slate-950 p-4 text-white sm:rounded-[2rem] sm:p-6"
+      >
         <div className="flex items-center gap-3">
-          <UsersRound className="text-blue-400" size={21} />
+          <UsersRound className="shrink-0 text-blue-400" size={22} />
           <div>
-            <p className="font-black">Próxima evolução</p>
-            <p className="mt-1 text-sm text-slate-400">Lista protegida, regras de limpeza e fila assistida de revisão.</p>
+            <p className="font-black">Montar a fila de limpeza</p>
+            <p className="mt-1 text-sm text-slate-400">
+              {latest.analysis.totals.notFollowingBack.toLocaleString("pt-BR")} contas não seguem você. Defina regras, proteja perfis e revise uma a uma.
+            </p>
           </div>
         </div>
-      </section>
+        <ArrowRight size={20} className="shrink-0 text-slate-400 transition group-hover:translate-x-0.5" />
+      </Link>
     </div>
   );
 }

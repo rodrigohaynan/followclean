@@ -57,7 +57,7 @@ export function AndroidOAuthReturn({ handoff }: { handoff: string }) {
   }
 
   return (
-    <main className="min-h-screen px-6 py-16">
+    <main className="px-6 py-16">
       <section className="mx-auto max-w-xl rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
         <div className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-black uppercase tracking-[0.14em] text-emerald-700">
           Instagram autorizado
@@ -72,7 +72,7 @@ export function AndroidOAuthReturn({ handoff }: { handoff: string }) {
         <button
           type="button"
           onClick={copyAndOpenApp}
-          className="mt-7 inline-flex w-full items-center justify-center rounded-xl bg-slate-950 px-5 py-3.5 text-sm font-black text-white"
+          className="mt-7 inline-flex w-full items-center justify-center rounded-xl fc-dark-action bg-slate-950 px-5 py-3.5 text-sm font-black text-white"
         >
           Copiar autorização e abrir FollowClean
         </button>

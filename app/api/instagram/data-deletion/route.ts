@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { verifyMetaSignedRequest } from "@/lib/instagram/signed-request";
+import { deleteCloudDataForOwner } from "@/lib/cloud/database";
 
 export const runtime = "nodejs";
 
@@ -31,9 +32,19 @@ export async function POST(request: Request) {
     );
   }
 
-  // Atualmente o FollowClean é local-first e não mantém dados pessoais
-  // dessa conta em banco no servidor. Portanto, não há registros remotos
-  // para excluir neste estágio do produto.
+  // Análises, protegidos e regras ficam no navegador do usuário. O único
+  // dado remoto é o checkpoint opcional em nuvem (contas profissionais),
+  // que é apagado aqui pelo ID da conta informado pela Meta.
+  try {
+    await deleteCloudDataForOwner(String(payload.user_id));
+  } catch (error) {
+    console.error("[Meta] data_deletion_cloud_error", error);
+    return NextResponse.json(
+      { error: "Não foi possível concluir a exclusão agora." },
+      { status: 500 },
+    );
+  }
+
   const confirmationCode = createHash("sha256")
     .update(`followclean:${payload.user_id}:${appSecret}`)
     .digest("hex")

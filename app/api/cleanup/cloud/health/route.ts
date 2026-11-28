@@ -24,11 +24,12 @@ export async function GET() {
       database: rows[0]?.ok === 1 ? "ready" : "unexpected",
     });
   } catch (error) {
+    // Detalhes do erro (host, usuário, SQL) ficam só no log do servidor.
+    console.error("[Cloud] health_check_error", error);
     return NextResponse.json(
       {
         configured: true,
         database: "error",
-        error: error instanceof Error ? error.message : "unknown",
       },
       { status: 500 },
     );
